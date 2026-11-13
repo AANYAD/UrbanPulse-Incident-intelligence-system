@@ -102,6 +102,9 @@
         .comment-send-btn:hover { border-color:var(--green); color:var(--green); }
 
         .empty-state { text-align:center; color:#333; margin-top:4rem; font-family:var(--mono); }
+        .dark-tiles {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
         @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
     </style>
 </head>
@@ -459,7 +462,9 @@ function renderIncidentList(list) {
             +'<span style="color:#444;font-size:0.7rem;">'+inc.latitude+', '+inc.longitude+'</span><br>'
             +(inc.department ? '<span class="dept-badge">'+inc.department+'</span> ' : '')
             +(inc.ref_id     ? '<span class="dept-badge">'+inc.ref_id+'</span> '     : '')
+            +(inc.input_method === 'voice' ? '<span class="dept-badge" style="background:#0c2818;border-color:#00ff9d;color:#00ff9d;">🎙 VOICE ('+(inc.original_language||'Voice')+')</span> ' : '')
             +(inc.created_at ? '<span class="time-ago">'+timeAgo(inc.created_at)+'</span>' : '')
+            +(inc.original_transcript ? '<div style="margin-top:4px;padding:4px 8px;background:#141b17;border-left:2px solid #00ff9d;font-size:0.72rem;color:#88b598;"><b>Original Transcript ('+(inc.original_language||'hi-IN')+'):</b> '+inc.original_transcript+'</div>' : '')
             +(sla ? '<br><span class="sla-badge '+sla.cls+'">'+sla.text+'</span>' : '')
             +(resolved && inc.resolved_at ? '<br><span class="time-ago">Resolved '+timeAgo(inc.resolved_at)+(inc.resolved_by?' by '+inc.resolved_by:'')+'</span>' : '')
             +(inc.image ? '<br><img src="'+inc.image+'" style="margin-top:6px;max-width:160px;max-height:100px;object-fit:cover;border:1px solid #2a2a2a;cursor:pointer;" onclick="this.style.maxWidth=this.style.maxWidth===\'100%\'?\'160px\':\'100%\'">' : '')
@@ -591,7 +596,11 @@ function renderMap(list) {
     var container = document.getElementById('hotspotMap');
     if (!adminMap) {
         adminMap = L.map(container).setView([20.5937, 78.9629], 5);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19}).addTo(adminMap);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            className: 'dark-tiles'
+        }).addTo(adminMap);
         adminLayer = L.layerGroup().addTo(adminMap);
     }
     adminLayer.clearLayers();

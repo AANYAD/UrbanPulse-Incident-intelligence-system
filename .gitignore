@@ -4,3 +4,10 @@ backend/__pycache__/
 backend/*.pyc
 backend/data.json
 backend/users.json
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Local backup files
+*.bak

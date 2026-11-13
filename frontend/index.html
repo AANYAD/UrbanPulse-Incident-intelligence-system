@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 
     <style>
         :root {
@@ -203,7 +204,23 @@
 
         /* MAP */
         .map-container { margin-top: 1rem; }
-        #map { width: 100%; height: 300px; border: 1px solid var(--border-color); border-radius: 6px; }
+        #map { width: 100%; height: 280px; border: 1px solid var(--border-color); background: #111; }
+        .dark-tiles {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+        .place-suggestions {
+            position: absolute; top: 100%; left: 0; right: 0; background: #161616;
+            border: 1px solid var(--border-color); border-top: none; z-index: 50;
+            max-height: 220px; overflow-y: auto; box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+        }
+        .place-suggestion-item {
+            padding: 0.6rem 0.8rem; font-family: var(--font-mono); font-size: 0.72rem;
+            color: #bbb; cursor: pointer; border-bottom: 1px solid #222; transition: background 0.15s;
+            line-height: 1.4;
+        }
+        .place-suggestion-item:hover { background: #222; color: var(--secondary-accent); }
+        .place-suggestion-name { font-weight: 700; color: #fff; display: block; }
+        .place-suggestion-sub { font-size: 0.65rem; color: #777; margin-top: 2px; }
         .type-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.5rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.9rem; }
         .type-badge .material-icons { font-size: 1rem; }
 
@@ -321,8 +338,11 @@
             </div>
             <!-- LOGIN FORM -->
             <div id="loginForm">
-                <input class="auth-input" id="loginUser" placeholder="Username" autocomplete="username">
+                <input class="auth-input" id="loginUser" placeholder="Username or Registered Email" autocomplete="username">
                 <input class="auth-input" id="loginPass" type="password" placeholder="Password" autocomplete="current-password">
+                <div style="display:flex;justify-content:flex-end;margin-top:-0.8rem;margin-bottom:1.2rem;">
+                    <button type="button" onclick="showAuthView('forgot')" style="background:none;border:none;color:#888;font-family:var(--font-mono);font-size:0.75rem;cursor:pointer;text-decoration:underline;">Forgot Password?</button>
+                </div>
                 <div class="auth-error" id="loginError"></div>
                 <button class="auth-submit" onclick="doLogin()">Login →</button>
             </div>
@@ -330,10 +350,35 @@
             <div id="signupForm" style="display:none;">
                 <input class="auth-input" id="signupUser"    placeholder="Username">
                 <input class="auth-input" id="signupEmail"   type="email" placeholder="Email (for alerts)">
-                <input class="auth-input" id="signupPass"    type="password" placeholder="Password">
-                <input class="auth-input" id="signupConfirm" type="password" placeholder="Confirm Password">
+                <input class="auth-input" id="signupPass"    type="password" placeholder="Password" oninput="checkPasswordMatch()">
+                <input class="auth-input" id="signupConfirm" type="password" placeholder="Confirm Password" oninput="checkPasswordMatch()">
+                <div id="passMatchMsg" class="mono" style="font-size:0.75rem;margin-top:0.35rem;margin-bottom:0.35rem;display:none;"></div>
                 <div class="auth-error" id="signupError"></div>
-                <button class="auth-submit" onclick="doSignup()">Create Account →</button>
+                <button class="auth-submit" id="signupSubmitBtn" onclick="doSignup()">Create Account →</button>
+            </div>
+            <!-- FORGOT PASSWORD FORM -->
+            <div id="forgotForm" style="display:none;">
+                <p class="mono" style="font-size:0.75rem;color:#888;margin-bottom:1.2rem;line-height:1.6;">
+                    Enter your registered email address. We'll send you a secure link to reset your password.
+                </p>
+                <input class="auth-input" id="forgotEmail" type="email" placeholder="Registered Email" autocomplete="email">
+                <div class="auth-error" id="forgotError"></div>
+                <div class="auth-success mono" id="forgotSuccess" style="color:var(--secondary-accent);font-size:0.75rem;margin-bottom:1rem;display:none;line-height:1.5;"></div>
+                <button class="auth-submit" id="forgotSubmitBtn" onclick="doForgotPassword()">Send Reset Link →</button>
+                <button type="button" class="auth-skip" onclick="showAuthView('login')">← Back to Login</button>
+            </div>
+            <!-- RESET PASSWORD FORM -->
+            <div id="resetForm" style="display:none;">
+                <p class="mono" style="font-size:0.75rem;color:#888;margin-bottom:1.2rem;line-height:1.6;">
+                    Enter a new password for your account.
+                </p>
+                <input class="auth-input" id="resetPass" type="password" placeholder="New Password" oninput="checkResetPasswordMatch()">
+                <input class="auth-input" id="resetConfirm" type="password" placeholder="Confirm New Password" oninput="checkResetPasswordMatch()">
+                <div id="resetPassMatchMsg" class="mono" style="font-size:0.75rem;margin-top:0.35rem;margin-bottom:0.35rem;display:none;"></div>
+                <div class="auth-error" id="resetError"></div>
+                <div class="auth-success mono" id="resetSuccess" style="color:var(--secondary-accent);font-size:0.75rem;margin-bottom:1rem;display:none;line-height:1.5;"></div>
+                <button class="auth-submit" id="resetSubmitBtn" onclick="doResetPassword()">Update Password →</button>
+                <button type="button" class="auth-skip" onclick="showAuthView('login')">← Back to Login</button>
             </div>
             <button class="auth-skip" onclick="skipAuth()">Continue as guest (tracking disabled)</button>
         </div>
@@ -398,7 +443,7 @@
                     <div class="tracking-panel">
                         <div class="tracking-title">📋 My Submitted Reports</div>
                         <div id="trackingPanel">
-                            <div class="mono" style="color:#555;font-size:0.8rem;">No reports submitted yet.</div>
+                            <div class="mono" style="color:#555;font-size:0.8rem;">You haven't submitted any reports yet.</div>
                         </div>
                     </div>
                 </div>
@@ -435,8 +480,8 @@
                         <label>Geolocation Data</label>
                         <!-- Mode toggle -->
                         <div style="display:flex;gap:0;margin-bottom:0.6rem;">
-                            <button type="button" id="btnLive"   onclick="setLocMode('live')"   style="flex:1;background:white;color:black;border:1px solid #333;font-family:var(--mono);font-size:0.7rem;padding:0.35rem 0;cursor:pointer;transition:0.2s;">[ LIVE GPS ]</button>
-                            <button type="button" id="btnManual" onclick="setLocMode('manual')" style="flex:1;background:transparent;color:#555;border:1px solid #333;border-left:none;font-family:var(--mono);font-size:0.7rem;padding:0.35rem 0;cursor:pointer;transition:0.2s;">[ MANUAL ]</button>
+                            <button type="button" id="btnLive"   onclick="setLocMode('live')"   style="flex:1;background:white;color:black;border:1px solid #333;font-family:var(--font-mono);font-size:0.7rem;padding:0.35rem 0;cursor:pointer;transition:0.2s;">[ LIVE GPS ]</button>
+                            <button type="button" id="btnManual" onclick="setLocMode('manual')" style="flex:1;background:transparent;color:#555;border:1px solid #333;border-left:none;font-family:var(--font-mono);font-size:0.7rem;padding:0.35rem 0;cursor:pointer;transition:0.2s;">[ SEARCH / MANUAL ]</button>
                         </div>
                         <!-- Live GPS panel -->
                         <div id="liveLocPanel">
@@ -445,24 +490,72 @@
                                 <button type="button" class="btn-locate" onclick="getLocation()">[ O ] ACQUIRE</button>
                             </div>
                         </div>
-                        <!-- Manual entry panel -->
+                        <!-- Manual entry / Search panel -->
                         <div id="manualLocPanel" style="display:none;">
+                            <div style="position:relative;margin-bottom:0.6rem;">
+                                <input type="text" class="brutal-input" id="placeSearchInput" placeholder="🔍 Search area, landmark, street or city..." autocomplete="off">
+                                <div id="placeSuggestions" class="place-suggestions" style="display:none;"></div>
+                            </div>
+                            <div id="selectedPlaceDisplay" class="mono" style="display:none;font-size:0.75rem;color:var(--secondary-accent);margin-bottom:0.6rem;padding:0.4rem;background:#181818;border-left:2px solid var(--secondary-accent);line-height:1.4;"></div>
                             <div style="display:flex;gap:0.5rem;">
                                 <input type="number" class="brutal-input" id="manualLat" placeholder="Latitude  e.g. 28.5691" step="any" style="flex:1;">
                                 <input type="number" class="brutal-input" id="manualLng" placeholder="Longitude e.g. 77.2100" step="any" style="flex:1;">
                             </div>
-                            <button type="button" onclick="confirmManual()" style="margin-top:0.4rem;width:100%;background:transparent;border:1px solid #333;color:#aaa;font-family:var(--mono);font-size:0.7rem;padding:0.35rem;cursor:pointer;">CONFIRM COORDINATES</button>
+                            <button type="button" onclick="confirmManual()" style="margin-top:0.4rem;width:100%;background:transparent;border:1px solid #333;color:#aaa;font-family:var(--font-mono);font-size:0.7rem;padding:0.35rem;cursor:pointer;">CONFIRM COORDINATES</button>
                         </div>
                         <div class="location-status" id="locStatus">WAITING FOR SATELLITE...</div>
                         <div id="mapContainer" class="map-container hidden">
                             <div id="map"></div>
-                            <div class="mono" style="font-size:0.8rem;color:#888;margin-top:0.5rem;">Drag marker or click map to fine-tune location</div>
+                            <div class="mono" style="font-size:0.75rem;color:#888;margin-top:0.5rem;">Drag marker or click map to adjust exact coordinates</div>
+                        </div>
+                    </div>
+
+                    <!-- Speech-Based Reporting Panel -->
+                    <div class="voice-reporting-panel" style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; background: #121212; border: 1px solid #2a2a2a; border-radius: 4px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.6rem;">
+                            <div style="display:flex; align-items:center; gap: 8px;">
+                                <span class="mono" style="font-size:0.7rem; color:#aaa; letter-spacing:0.05em; font-weight:600;">VOICE INPUT</span>
+                                <span id="voiceStatusBadge" class="mono" style="font-size:0.65rem; color:#666; display:none; padding:2px 6px; border-radius:2px; background:#1f1f1f;">IDLE</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap: 8px;">
+                                <label for="voiceLangSelect" class="mono" style="font-size:0.68rem; color:#777;">LANGUAGE:</label>
+                                <select id="voiceLangSelect" class="mono" style="background:#1a1a1a; border:1px solid #333; color:#eee; font-size:0.72rem; padding:4px 8px; border-radius:2px; cursor:pointer;" onchange="onVoiceLangChange()">
+                                    <option value="en-IN">English (India)</option>
+                                    <option value="hi-IN">Hindi (हिंदी)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                            <button type="button" id="voiceBtn" onclick="toggleVoiceInput()" style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; background:#1b1b1b; border:1px solid #3a3a3a; color:#fff; font-family:var(--font-mono); font-size:0.75rem; padding:0.55rem 0.8rem; border-radius:2px; cursor:pointer; transition:all 0.2s ease;">
+                                <span id="voiceMicIcon" style="font-size:1rem; line-height:1;">🎙</span>
+                                <span id="voiceBtnText">START VOICE RECORDING</span>
+                            </button>
+                        </div>
+                        <div id="voiceNotice" class="mono" style="font-size:0.65rem; color:#777; margin-top:0.45rem; line-height:1.4;">
+                            Tip: Speak clearly in English or Hindi. Free browser-native voice input.
+                        </div>
+                    </div>
+
+                    <!-- Editable Original Hindi Transcript Panel (shown only when Hindi voice is recorded) -->
+                    <div id="hindiTranscriptContainer" class="input-group" style="display:none; margin-bottom: 1.25rem; padding: 0.85rem 1rem; background: #141b17; border: 1px solid #1f3d2b; border-radius: 4px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.4rem;">
+                            <label style="color:#00ff9d; font-size:0.75rem; font-weight:600; margin-bottom:0;">
+                                ORIGINAL HINDI TRANSCRIPT (हिंदी प्रतिलेख)
+                            </label>
+                            <span class="mono" style="font-size:0.65rem; color:#00ff9d; background:#0c2818; padding:2px 6px; border-radius:2px;">EDITABLE</span>
+                        </div>
+                        <p class="mono" style="font-size:0.65rem; color:#88b598; margin:0 0 0.5rem 0;">
+                            Review or edit the captured Hindi transcript below if needed.
+                        </p>
+                        <textarea class="brutal-input" id="hindiTranscript" rows="2" placeholder="बोलकर दर्ज किया गया हिंदी विवरण..." style="resize:vertical; background:#0e1410; border-color:#204a32; color:#d4f5e2;"></textarea>
+                        <div class="mono" style="font-size:0.65rem; color:#ffb84d; margin-top:0.5rem; line-height:1.4;">
+                            ⚠️ <b>Action Required:</b> Please provide or confirm the <b>English Complaint Description</b> below for accurate AI severity assessment and department routing.
                         </div>
                     </div>
 
                     <div class="input-group">
-                        <label>Description</label>
-                        <textarea class="brutal-input" id="desc" rows="1" placeholder="Brief details..." style="resize: none;"></textarea>
+                        <label id="descLabel">Description <span id="descSubText" class="mono" style="font-size:0.7rem; color:#777; font-weight:normal;">(English)</span></label>
+                        <textarea class="brutal-input" id="desc" rows="2" placeholder="Brief details in English..." style="resize: vertical;"></textarea>
                     </div>
 
                     <button type="submit" class="action-btn" id="submitBtn">
@@ -482,6 +575,7 @@
         </div>
     </footer>
 
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script>
         // MODAL
         const modal = document.getElementById('customModal');
@@ -531,6 +625,73 @@
 
         // LOCATION MODE TOGGLE
         var locMode = 'live';
+        var miniMap = null;
+        var miniMarker = null;
+        window.selectedPlaceName = null;
+
+        function initMiniMap(lat, lng) {
+            const container = document.getElementById('mapContainer');
+            if (container) container.classList.remove('hidden');
+
+            const defaultLat = lat || 28.6139;
+            const defaultLng = lng || 77.2090;
+
+            if (!miniMap && typeof L !== 'undefined') {
+                const mapEl = document.getElementById('map');
+                if (!mapEl) return;
+                miniMap = L.map('map', { zoomControl: true }).setView([defaultLat, defaultLng], 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors',
+                    className: 'dark-tiles'
+                }).addTo(miniMap);
+
+                miniMarker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(miniMap);
+                miniMarker.on('dragend', function(e) {
+                    const pos = e.target.getLatLng();
+                    updateLocationCoords(pos.lat, pos.lng, true);
+                });
+
+                miniMap.on('click', function(e) {
+                    miniMarker.setLatLng(e.latlng);
+                    updateLocationCoords(e.latlng.lat, e.latlng.lng, true);
+                });
+            } else if (miniMap) {
+                miniMap.invalidateSize();
+                if (lat && lng) {
+                    miniMap.setView([lat, lng], 15);
+                    if (miniMarker) miniMarker.setLatLng([lat, lng]);
+                }
+            }
+        }
+
+        function updateLocationCoords(lat, lng, fromMapDrag = false) {
+            const latFixed = Number(lat).toFixed(6);
+            const lngFixed = Number(lng).toFixed(6);
+
+            const input = document.getElementById('locationInput');
+            if (input) input.value = `${latFixed}, ${lngFixed}`;
+
+            const manualLat = document.getElementById('manualLat');
+            const manualLng = document.getElementById('manualLng');
+            if (manualLat) manualLat.value = latFixed;
+            if (manualLng) manualLng.value = lngFixed;
+
+            const status = document.getElementById('locStatus');
+            if (status) {
+                status.innerText = `COORDINATES LOCKED: ${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+                status.style.color = "var(--secondary-accent)";
+                status.classList.remove('scanning');
+            }
+
+            if (fromMapDrag) {
+                const placeDisp = document.getElementById('selectedPlaceDisplay');
+                if (placeDisp && window.selectedPlaceName) {
+                    placeDisp.innerText = `📍 Pin Adjusted: ${window.selectedPlaceName} (${latFixed}, ${lngFixed})`;
+                }
+            }
+        }
+
         function setLocMode(mode) {
             locMode = mode;
             document.getElementById('liveLocPanel').style.display   = mode === 'live'   ? '' : 'none';
@@ -541,8 +702,10 @@
             document.getElementById('btnManual').style.color      = mode === 'manual' ? 'black'       : '#555';
             const status = document.getElementById('locStatus');
             if (mode === 'manual') {
-                status.innerText = "ENTER COORDINATES MANUALLY";
-                status.style.color = "#666";
+                status.innerText = "SEARCH LOCATION OR ENTER COORDINATES";
+                status.style.color = "#888";
+                initMiniMap();
+                setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 200);
             } else {
                 status.innerText = "WAITING FOR SATELLITE...";
                 status.style.color = "#666";
@@ -555,25 +718,17 @@
             const status = document.getElementById('locStatus');
             if (isNaN(lat) || isNaN(lng)) {
                 status.innerText = "INVALID COORDINATES";
-                status.style.color = "var(--accent)";
+                status.style.color = "var(--accent-color)";
                 return;
             }
             if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
                 status.innerText = "OUT OF RANGE (lat -90..90, lng -180..180)";
-                status.style.color = "var(--accent)";
+                status.style.color = "var(--accent-color)";
                 return;
             }
-            // Store in locationInput so report.js can pick it up
-            let hidden = document.getElementById('locationInput');
-            if (!hidden) {
-                hidden = document.createElement('input');
-                hidden.type = 'hidden';
-                hidden.id   = 'locationInput';
-                document.body.appendChild(hidden);
-            }
-            hidden.value = lat.toFixed(6) + ', ' + lng.toFixed(6);
-            status.innerText = "COORDINATES SET: " + lat.toFixed(4) + ", " + lng.toFixed(4);
-            status.style.color = "var(--secondary-accent)";
+            window.selectedPlaceName = `Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+            updateLocationCoords(lat, lng, false);
+            initMiniMap(lat, lng);
         }
 
         // GEOLOCATION
@@ -593,24 +748,103 @@
 
         function showPosition(position) {
             const status = document.getElementById('locStatus');
-            const input  = document.getElementById('locationInput');
-            setTimeout(() => {
-                const lat  = position.coords.latitude.toFixed(6);
-                const long = position.coords.longitude.toFixed(6);
-                input.value  = `${lat}, ${long}`;
-                status.innerText = "SIGNAL LOCKED";
-                status.classList.remove('scanning');
-                status.style.color = "var(--secondary-accent)";
-                showDialog("TARGET ACQUIRED", `Coordinates locked: ${lat}, ${long}`, "success");
-            }, 1500);
+            const lat  = position.coords.latitude;
+            const long = position.coords.longitude;
+            window.selectedPlaceName = `GPS (${lat.toFixed(4)}, ${long.toFixed(4)})`;
+            updateLocationCoords(lat, long, false);
+            initMiniMap(lat, long);
+            showDialog("TARGET ACQUIRED", `Coordinates locked: ${lat.toFixed(6)}, ${long.toFixed(6)}`, "success");
         }
 
         function showError() {
             const status = document.getElementById('locStatus');
-            status.innerText = "SIGNAL LOST — try Manual mode";
+            status.innerText = "SIGNAL LOST — try Search / Manual mode";
             status.classList.remove('scanning');
-            status.style.color = "var(--accent)";
+            status.style.color = "var(--accent-color)";
         }
+
+        // PLACE SEARCH AUTOCOMPLETE
+        var searchDebounceTimer = null;
+        function setupPlaceAutocomplete() {
+            const input = document.getElementById('placeSearchInput');
+            const dropdown = document.getElementById('placeSuggestions');
+            if (!input || !dropdown) return;
+
+            input.addEventListener('input', function() {
+                const query = input.value.trim();
+                clearTimeout(searchDebounceTimer);
+                if (query.length < 2) {
+                    dropdown.style.display = 'none';
+                    dropdown.innerHTML = '';
+                    return;
+                }
+
+                searchDebounceTimer = setTimeout(async function() {
+                    dropdown.innerHTML = '<div class="place-suggestion-item" style="color:#777;">Searching locations...</div>';
+                    dropdown.style.display = 'block';
+
+                    let places = [];
+                    try {
+                        const res = await fetch(`http://127.0.0.1:8000/api/places/search?q=${encodeURIComponent(query)}`);
+                        if (res.ok) places = await res.json();
+                    } catch(e) {}
+
+                    // Fallback to direct Nominatim if backend search returns empty
+                    if (!places || places.length === 0) {
+                        try {
+                            const fallback = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
+                            if (fallback.ok) {
+                                const raw = await fallback.json();
+                                places = raw.map(r => ({
+                                    name: r.name || (r.display_name ? r.display_name.split(',')[0] : 'Location'),
+                                    display_name: r.display_name,
+                                    lat: parseFloat(r.lat),
+                                    lon: parseFloat(r.lon),
+                                    type: r.type || ''
+                                }));
+                            }
+                        } catch(e) {}
+                    }
+
+                    if (!places || places.length === 0) {
+                        dropdown.innerHTML = '<div class="place-suggestion-item" style="color:#777;">No matching locations found</div>';
+                        return;
+                    }
+
+                    dropdown.innerHTML = places.map((p, idx) => `
+                        <div class="place-suggestion-item" data-idx="${idx}" onclick="window.selectSuggestedPlace(${p.lat}, ${p.lon}, '${(p.name||'').replace(/'/g, "\\'")}', '${(p.display_name||'').replace(/'/g, "\\'")}')">
+                            <span class="place-suggestion-name">📍 ${p.name}</span>
+                            <span class="place-suggestion-sub">${p.display_name}</span>
+                        </div>
+                    `).join('');
+                    dropdown.style.display = 'block';
+                }, 350);
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        window.selectSuggestedPlace = function(lat, lng, name, displayName) {
+            window.selectedPlaceName = displayName || name;
+            const input = document.getElementById('placeSearchInput');
+            const dropdown = document.getElementById('placeSuggestions');
+            const placeDisp = document.getElementById('selectedPlaceDisplay');
+
+            if (input) input.value = name;
+            if (dropdown) dropdown.style.display = 'none';
+
+            if (placeDisp) {
+                placeDisp.innerText = `📍 Selected: ${displayName || name}`;
+                placeDisp.style.display = 'block';
+            }
+
+            updateLocationCoords(lat, lng, false);
+            initMiniMap(lat, lng);
+        };
 
         // TYPE PREVIEW
         function getTypeMeta(type) {
@@ -641,27 +875,44 @@
             renderTrackingPanel();
         });
 
-        // CITIZEN TRACKING PANEL
-        function renderTrackingPanel() {
+        // CITIZEN TRACKING PANEL (User-Specific Backend Query)
+        window.renderTrackingPanel = async function() {
             const panel = document.getElementById("trackingPanel");
             if (!panel) return;
-            const myIncidents = JSON.parse(localStorage.getItem("myIncidents") || "[]");
-            if (myIncidents.length === 0) {
-                panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">No reports submitted yet.</div>';
+            const token = localStorage.getItem('up_token');
+            if (!token) {
+                panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
                 return;
             }
-            panel.innerHTML = myIncidents.map(i => `
-                <div class="track-item">
-                    <div class="mono" style="font-size:0.75rem;color:#888;line-height:1.7;">
-                        <b style="color:var(--secondary-accent);letter-spacing:1px;">${i.ref_id}</b><br>
-                        ${i.description.substring(0, 55)}${i.description.length > 55 ? '...' : ''}<br>
-                        <span style="color:#444;">${i.submitted_at}</span>
+
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/incidents/my?token=${encodeURIComponent(token)}`);
+                if (!res.ok) {
+                    panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
+                    return;
+                }
+                const myIncidents = await res.json();
+                if (!myIncidents || myIncidents.length === 0) {
+                    panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
+                    return;
+                }
+                panel.innerHTML = myIncidents.map(i => `
+                    <div class="track-item" id="track-${i.ref_id}">
+                        <div class="mono" style="font-size:0.75rem;color:#888;line-height:1.7;">
+                            <b style="color:var(--secondary-accent);letter-spacing:1px;">${i.ref_id}</b>
+                            ${i.category ? `<span style="color:#666;font-size:0.7rem;"> · ${i.category}</span>` : ''}<br>
+                            ${i.description ? i.description.substring(0, 55) + (i.description.length > 55 ? '...' : '') : ''}<br>
+                            <span style="color:#444;">${i.created_at ? new Date(i.created_at).toLocaleString() : ''}</span>
+                        </div>
+                        <button class="track-btn" onclick="checkStatus('${i.ref_id}')">CHECK STATUS →</button>
+                        <div id="status-${i.ref_id}" class="track-status"></div>
                     </div>
-                    <button class="track-btn" onclick="checkStatus('${i.ref_id}')">CHECK STATUS →</button>
-                    <div id="status-${i.ref_id}" class="track-status"></div>
-                </div>
-            `).join('');
-        }
+                `).join('');
+            } catch(e) {
+                panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
+            }
+        };
+        function renderTrackingPanel() { window.renderTrackingPanel(); }
 
         window.checkStatus = async function(refId) {
             const el = document.getElementById(`status-${refId}`);
@@ -686,8 +937,13 @@
                             Status: <b style="color:${statusColor};">${data.status}</b><br>
                             Severity: <b style="color:${sevColor};">${data.severity}</b><br>
                             Dept: <b style="color:#e0e0e0;">${data.department}</b><br>
+                            ${data.input_method === "voice" ? `<span class="mono" style="font-size:0.68rem; color:#00ff9d; background:#0c2818; padding:2px 6px; border-radius:2px;">🎙 VOICE (${data.original_language || 'Voice'})</span><br>` : ''}
                             ${data.resolved_at ? `<span style="color:#00ff9d;">✓ Resolved</span>` : `<span style="color:#555;">Pending resolution</span>`}
                         </div>
+                        ${data.original_transcript ? `
+                        <div style="margin-top:6px;padding:6px 8px;background:#141b17;border-left:2px solid #00ff9d;font-size:0.7rem;color:#88b598;">
+                            <b>Original Hindi Transcript:</b> "${data.original_transcript}"
+                        </div>` : ''}
                         <div class="comment-section">
                             <div class="mono" style="font-size:0.65rem;color:#555;margin-bottom:6px;">UPDATES</div>
                             <div id="comments-${refId}">${comments}</div>
@@ -731,11 +987,21 @@
     let currentUser = null;
     let citizenSSE  = null;
 
+    function showAuthView(view) {
+        document.getElementById('loginForm').style.display  = view === 'login'  ? '' : 'none';
+        document.getElementById('signupForm').style.display = view === 'signup' ? '' : 'none';
+        document.getElementById('forgotForm').style.display = view === 'forgot' ? '' : 'none';
+        document.getElementById('resetForm').style.display  = view === 'reset'  ? '' : 'none';
+        const tabs = document.querySelector('.auth-tabs');
+        if (tabs) {
+            tabs.style.display = (view === 'login' || view === 'signup') ? 'flex' : 'none';
+            document.querySelectorAll('.auth-tab').forEach((t, i) => {
+                t.classList.toggle('active', (i === 0 && view === 'login') || (i === 1 && view === 'signup'));
+            });
+        }
+    }
     function switchAuthTab(tab) {
-        document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
-        document.getElementById('loginForm').style.display  = tab === 'login'  ? '' : 'none';
-        document.getElementById('signupForm').style.display = tab === 'signup' ? '' : 'none';
+        showAuthView(tab);
     }
 
     async function doLogin() {
@@ -760,6 +1026,33 @@
         }
     }
 
+    window.checkPasswordMatch = function() {
+        const passEl = document.getElementById('signupPass');
+        const confirmEl = document.getElementById('signupConfirm');
+        const msg = document.getElementById('passMatchMsg');
+        if (!passEl || !confirmEl || !msg) return;
+
+        const pass = passEl.value;
+        const confirm = confirmEl.value;
+
+        // 1. If confirm is empty, hide validation message completely
+        if (!confirm) {
+            msg.style.display = 'none';
+            msg.innerText = '';
+            return;
+        }
+
+        // 2. When confirm has text, compare immediately
+        msg.style.display = 'block';
+        if (pass === confirm) {
+            msg.style.color = 'var(--secondary-accent)';
+            msg.innerText = '✓ Passwords match';
+        } else {
+            msg.style.color = 'var(--accent-color)';
+            msg.innerText = '✗ Passwords do not match';
+        }
+    };
+
     async function doSignup() {
         const user    = document.getElementById('signupUser').value.trim();
         const email   = document.getElementById('signupEmail').value.trim();
@@ -768,8 +1061,12 @@
         document.getElementById('signupError').innerText = '';
         if (!user || !pass) { document.getElementById('signupError').innerText = 'Fill all fields'; return; }
         if (!email || !email.includes('@')) { document.getElementById('signupError').innerText = 'Enter a valid email'; return; }
-        if (pass !== confirm) { document.getElementById('signupError').innerText = 'Passwords do not match'; return; }
         if (pass.length < 4) { document.getElementById('signupError').innerText = 'Password must be at least 4 characters'; return; }
+        if (pass !== confirm) {
+            document.getElementById('signupError').innerText = 'Passwords do not match';
+            checkPasswordMatch();
+            return;
+        }
         try {
             const res = await fetch(`${API}/auth/signup`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
@@ -783,6 +1080,132 @@
             loginSuccess(data.token, data.display, data.role);
         } catch(e) {
             document.getElementById('signupError').innerText = 'Cannot reach server. Try again.';
+        }
+    }
+
+    window.checkResetPasswordMatch = function() {
+        const passEl = document.getElementById('resetPass');
+        const confirmEl = document.getElementById('resetConfirm');
+        const msg = document.getElementById('resetPassMatchMsg');
+        if (!passEl || !confirmEl || !msg) return;
+
+        const pass = passEl.value;
+        const confirm = confirmEl.value;
+
+        if (!confirm) {
+            msg.style.display = 'none';
+            msg.innerText = '';
+            return;
+        }
+        msg.style.display = 'block';
+        if (pass === confirm) {
+            msg.style.color = 'var(--secondary-accent)';
+            msg.innerText = '✓ Passwords match';
+        } else {
+            msg.style.color = 'var(--accent-color)';
+            msg.innerText = '✗ Passwords do not match';
+        }
+    };
+
+    async function doForgotPassword() {
+        const email = document.getElementById('forgotEmail').value.trim();
+        const errEl = document.getElementById('forgotError');
+        const succEl = document.getElementById('forgotSuccess');
+        const btn = document.getElementById('forgotSubmitBtn');
+        errEl.innerText = '';
+        succEl.style.display = 'none';
+        succEl.innerText = '';
+
+        if (!email || !email.includes('@')) {
+            errEl.innerText = 'Please enter a valid email address';
+            return;
+        }
+
+        btn.innerText = 'SENDING...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch(`${API}/auth/forgot-password`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                errEl.innerText = data.detail || 'Failed to dispatch reset email';
+                return;
+            }
+            succEl.innerText = data.message || 'If this email is registered, a password reset link has been sent to it.';
+            succEl.style.display = 'block';
+            document.getElementById('forgotEmail').value = '';
+        } catch(e) {
+            errEl.innerText = 'Cannot reach server. Try again.';
+        } finally {
+            btn.innerText = 'Send Reset Link →';
+            btn.disabled = false;
+        }
+    }
+
+    async function doResetPassword() {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('reset_token');
+        const pass = document.getElementById('resetPass').value;
+        const confirm = document.getElementById('resetConfirm').value;
+        const errEl = document.getElementById('resetError');
+        const succEl = document.getElementById('resetSuccess');
+        const btn = document.getElementById('resetSubmitBtn');
+
+        errEl.innerText = '';
+        succEl.style.display = 'none';
+
+        if (!token) {
+            errEl.innerText = 'Invalid or missing reset token in URL.';
+            return;
+        }
+        if (!pass || pass.length < 4) {
+            errEl.innerText = 'Password must be at least 4 characters';
+            return;
+        }
+        if (pass !== confirm) {
+            errEl.innerText = 'Passwords do not match';
+            checkResetPasswordMatch();
+            return;
+        }
+
+        btn.innerText = 'UPDATING...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch(`${API}/auth/reset-password`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ token, new_password: pass })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                errEl.innerText = data.detail || 'Reset failed. Link may have expired.';
+                return;
+            }
+            succEl.innerText = data.message || 'Password reset successfully. Redirecting to login...';
+            succEl.style.display = 'block';
+            document.getElementById('resetPass').value = '';
+            document.getElementById('resetConfirm').value = '';
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setTimeout(() => {
+                showAuthView('login');
+                const loginUser = document.getElementById('loginUser');
+                if (loginUser && data.username) loginUser.value = data.username;
+                const loginPass = document.getElementById('loginPass');
+                if (loginPass) {
+                    loginPass.value = '';
+                    loginPass.focus();
+                }
+            }, 1800);
+        } catch(e) {
+            errEl.innerText = 'Cannot reach server. Try again.';
+        } finally {
+            btn.innerText = 'Update Password →';
+            btn.disabled = false;
         }
     }
 
@@ -844,6 +1267,7 @@
         localStorage.removeItem('up_token');
         localStorage.removeItem('up_display');
         localStorage.removeItem('up_role');
+        localStorage.removeItem('myIncidents');
         currentUser = null;
         location.reload();
     }
@@ -863,22 +1287,52 @@
         }
     }
 
-    // On load — check if already logged in
+    // Clean up any legacy test data
+    try { localStorage.removeItem('myIncidents'); } catch(e) {}
+
+    function setupPasswordValidation() {
+        const passEl = document.getElementById('signupPass');
+        const confirmEl = document.getElementById('signupConfirm');
+        if (passEl) {
+            passEl.oninput = window.checkPasswordMatch;
+            passEl.addEventListener('input', window.checkPasswordMatch);
+        }
+        if (confirmEl) {
+            confirmEl.oninput = window.checkPasswordMatch;
+            confirmEl.addEventListener('input', window.checkPasswordMatch);
+        }
+        const resetPass = document.getElementById('resetPass');
+        const resetConfirm = document.getElementById('resetConfirm');
+        if (resetPass) {
+            resetPass.oninput = window.checkResetPasswordMatch;
+            resetPass.addEventListener('input', window.checkResetPasswordMatch);
+        }
+        if (resetConfirm) {
+            resetConfirm.oninput = window.checkResetPasswordMatch;
+            resetConfirm.addEventListener('input', window.checkResetPasswordMatch);
+        }
+    }
+    setupPasswordValidation();
+
+    // On load — check if already logged in and bind real-time validation & search autocomplete
     window.addEventListener('DOMContentLoaded', () => {
+        setupPasswordValidation();
+        setupPlaceAutocomplete();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const resetToken = urlParams.get('reset_token');
+        if (resetToken) {
+            document.getElementById('authOverlay').classList.remove('hidden');
+            showAuthView('reset');
+            return;
+        }
+
         const token = localStorage.getItem('up_token');
         if (token) {
             document.getElementById('authOverlay').classList.add('hidden');
             updateNavUser();
+            renderTrackingPanel();
         }
-        // Auto-refresh tracked incident statuses every 30s
-        setInterval(function() {
-            const myIncidents = JSON.parse(localStorage.getItem('myIncidents') || '[]');
-            myIncidents.forEach(function(i) {
-                if (document.getElementById('status-' + i.ref_id)) {
-                    window.checkStatus(i.ref_id);
-                }
-            });
-        }, 30000);
     });
     </script>
 
