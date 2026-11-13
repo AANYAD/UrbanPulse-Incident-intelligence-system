@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 from transformers import pipeline
@@ -81,8 +82,21 @@ classifier = pipeline(
 )
 
 # ── PERSISTENCE ───────────────────────────────────────────────────────
-DATA_FILE  = "data.json"
-USERS_FILE = "users.json"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_FILE  = os.path.join(BASE_DIR, "data.json") if os.path.exists(os.path.join(BASE_DIR, "data.json")) else "data.json"
+USERS_FILE = os.path.join(BASE_DIR, "users.json") if os.path.exists(os.path.join(BASE_DIR, "users.json")) else "users.json"
+
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+
+@app.get("/")
+def read_root():
+    root_index = os.path.join(PROJECT_ROOT, "index.html")
+    if os.path.exists(root_index):
+        return FileResponse(root_index)
+    return RedirectResponse(url="/frontend/index.html")
 
 def load_data():
     """Load incidents from disk on startup."""
@@ -202,6 +216,17 @@ class CommentRequest(BaseModel):
     token:       str
     message:     str
 
+class IncidentCommentRequest(BaseModel):
+    token:   str
+    message: str
+
+class FlagReviewRequest(BaseModel):
+    token: Optional[str] = None
+
+class AdminReviewActionRequest(BaseModel):
+    token:  str
+    action: str  # "approve", "reject", "restore"
+
 # ── KEYWORDS ─────────────────────────────────────────────────────────
 HIGH_KEYWORDS   = ["fire","explosion","gas leak","unconscious","electrocuted","flood",
                    "collapse","blast","cylinder","toxic","shooting","accident","emergency"]
@@ -264,6 +289,18 @@ def require_auth(token: str, roles: list = None):
     if roles and user["role"] not in roles:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return user
+
+def find_incident(incident_id: str):
+    if not incident_id:
+        return None
+    target = str(incident_id).strip()
+    if target in incidents:
+        return incidents[target]
+    target_lower = target.lower()
+    for inc in incidents.values():
+        if str(inc.get("id", "")).strip().lower() == target_lower or str(inc.get("ref_id", "")).strip().lower() == target_lower:
+            return inc
+    return None
 
 # ── AUTH: CITIZEN SIGNUP ──────────────────────────────────────────────
 @app.post("/auth/signup")
@@ -647,28 +684,34 @@ async def classify(req: IncidentRequest):
 # ── CITIZEN: TRACK ────────────────────────────────────────────────────
 @app.get("/track/{ref_id}")
 def track(ref_id: str):
-    for inc in incidents.values():
-        if inc["ref_id"] == ref_id:
-            return {
-                "id":                  inc["id"],
-                "ref_id":              inc["ref_id"],
-                "status":              inc["status"],
-                "severity":            inc["severity"],
-                "department":          inc["department"],
-                "description":         inc.get("description", ""),
-                "created_at":          inc["created_at"],
-                "resolved_at":         inc["resolved_at"],
-                "history":             inc.get("history", []),
-                "comments":            [c for c in inc.get("comments", []) if not c.get("internal")],
-                "original_transcript": inc.get("original_transcript"),
-                "original_language":   inc.get("original_language"),
-                "input_method":        inc.get("input_method", "manual"),
-            }
+    inc = find_incident(ref_id)
+    if inc:
+        return {
+            "id":                  inc["id"],
+            "ref_id":              inc["ref_id"],
+            "status":              inc["status"],
+            "severity":            inc["severity"],
+            "department":          inc["department"],
+            "description":         inc.get("description", ""),
+            "created_at":          inc["created_at"],
+            "resolved_at":         inc["resolved_at"],
+            "history":             inc.get("history", []),
+            "comments":            [c for c in inc.get("comments", []) if not c.get("internal")],
+            "original_transcript": inc.get("original_transcript"),
+            "original_language":   inc.get("original_language"),
+            "input_method":        inc.get("input_method", "manual"),
+            "review_status":       inc.get("review_status"),
+            "review_requested_by": inc.get("review_requested_by"),
+            "review_requested_at": inc.get("review_requested_at"),
+            "review_decision":     inc.get("review_decision"),
+            "is_removed":          inc.get("is_removed", False),
+        }
     raise HTTPException(status_code=404, detail="Incident not found")
 
 # ── CITIZEN: MY SUBMITTED REPORTS ─────────────────────────────────────
 @app.get("/incidents/my")
-def get_my_incidents(token: str):
+@app.get("/incidents/my/")
+def get_my_incidents(token: str, status: Optional[str] = None, sort: Optional[str] = None):
     user = require_auth(token)
     user_id = user.get("user_id")
     if not user_id:
@@ -679,8 +722,76 @@ def get_my_incidents(token: str):
         i for i in incidents.values()
         if i.get("user_id") and i.get("user_id") == user_id
     ]
-    my_reports.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+    if status:
+        st_lower = status.strip().lower()
+        if st_lower == "active":
+            my_reports = [
+                i for i in my_reports
+                if (i.get("status") or "").upper() != "RESOLVED" and not i.get("resolved_at")
+            ]
+        elif st_lower == "resolved":
+            my_reports = [
+                i for i in my_reports
+                if (i.get("status") or "").upper() == "RESOLVED" or i.get("resolved_at")
+            ]
+
+    reverse = (sort or "newest").strip().lower() != "oldest"
+    my_reports.sort(key=lambda x: x.get("created_at", ""), reverse=reverse)
     return my_reports
+
+# ── CITIZEN: FLAG INCIDENT FOR REVIEW ─────────────────────────────────
+@app.post("/incidents/{incident_id}/flag-review")
+@app.post("/incidents/{incident_id}/flag-review/")
+async def flag_incident_for_review(incident_id: str, req: Optional[FlagReviewRequest] = None, token: Optional[str] = None):
+    auth_token = (req.token if req and req.token else None) or token
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Authentication token required")
+    user = require_auth(auth_token)
+
+    inc = find_incident(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    user_id = user.get("user_id")
+    if not user_id or inc.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Users can only flag their own incidents")
+
+    # Prevent duplicate pending review requests
+    if inc.get("review_status") == "pending":
+        raise HTTPException(status_code=400, detail="A review request is already pending for this incident")
+
+    now_iso = datetime.now().isoformat()
+    requested_by = user.get("username") or user.get("display") or "citizen"
+
+    # Store review metadata without altering classification, severity, department, SLA, description or deleting
+    inc["review_status"] = "pending"
+    inc["review_requested_by"] = requested_by
+    inc["review_requested_at"] = now_iso
+    if "is_removed" not in inc:
+        inc["is_removed"] = False
+
+    inc.setdefault("history", []).append({
+        "status": inc["status"],
+        "time": now_iso,
+        "by": f"{user.get('display', requested_by)} (Flagged for Review)"
+    })
+
+    save_data()
+
+    await broadcast("review_requested", {
+        "id": inc["id"],
+        "ref_id": inc["ref_id"],
+        "review_status": "pending",
+        "review_requested_by": requested_by,
+        "review_requested_at": now_iso
+    })
+
+    return {
+        "ok": True,
+        "message": "Incident flagged for review successfully",
+        "incident": inc
+    }
 
 # ── PUBLIC: HEATMAP + STATS ───────────────────────────────────────────
 @app.get("/public/heatmap")
@@ -691,11 +802,12 @@ def public_heatmap():
          "status": i["status"], "created_at": i["created_at"],
          "description": i.get("description","")}
         for i in incidents.values()
+        if not i.get("is_removed", False)
     ]
 
 @app.get("/public/stats")
 def public_stats():
-    all_inc = list(incidents.values())
+    all_inc = [i for i in incidents.values() if not i.get("is_removed", False)]
     cats = {}
     for i in all_inc:
         c = i.get("category", "Other")
@@ -712,16 +824,19 @@ def public_stats():
 # ── ADMIN: LIST + FILTER ──────────────────────────────────────────────
 @app.get("/incidents")
 def get_incidents(
-    status:     Optional[str] = None,
-    severity:   Optional[str] = None,
-    department: Optional[str] = None,
-    category:   Optional[str] = None,
-    search:     Optional[str] = None,
-    date_from:  Optional[str] = None,
-    date_to:    Optional[str] = None,
-    area:       Optional[str] = None,
+    status:          Optional[str] = None,
+    severity:        Optional[str] = None,
+    department:      Optional[str] = None,
+    category:        Optional[str] = None,
+    search:          Optional[str] = None,
+    date_from:       Optional[str] = None,
+    date_to:         Optional[str] = None,
+    area:            Optional[str] = None,
+    include_removed: Optional[bool] = False,
 ):
     result = list(incidents.values())
+    if not include_removed:
+        result = [i for i in result if not i.get("is_removed", False)]
     if status:    result = [i for i in result if i["status"] == status.upper()]
     if severity:  result = [i for i in result if i["severity"] == severity.upper()]
     if department:result = [i for i in result if i.get("department","").lower() == department.lower()]
@@ -747,6 +862,103 @@ def get_incidents(
         except: pass
     result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
+
+# ── ADMIN: INCIDENT REMOVAL REQUESTS ──────────────────────────────────
+@app.get("/admin/removal-requests")
+@app.get("/admin/removal-requests/")
+def get_removal_requests(token: str):
+    admin_user = require_auth(token, roles=["super_admin", "dept_admin", "field_officer"])
+
+    requests = []
+    for inc in incidents.values():
+        rev_status = inc.get("review_status")
+        is_rem = inc.get("is_removed", False)
+        if rev_status or is_rem:
+            submitting_user = inc.get("review_requested_by")
+            if not submitting_user and inc.get("user_id"):
+                for uname, udata in citizen_users.items():
+                    if udata.get("user_id") == inc.get("user_id"):
+                        submitting_user = udata.get("display") or uname
+                        break
+            if not submitting_user:
+                submitting_user = "Unknown"
+
+            inc_copy = dict(inc)
+            inc_copy["submitting_user"] = submitting_user
+            requests.append(inc_copy)
+
+    requests.sort(key=lambda x: x.get("review_requested_at") or x.get("created_at") or "", reverse=True)
+    return requests
+
+# ── ADMIN: PROCESS REVIEW ACTION (APPROVE / REJECT / RESTORE) ──────────
+@app.post("/admin/incidents/{incident_id}/review")
+@app.post("/admin/incidents/{incident_id}/review/")
+@app.post("/incidents/{incident_id}/review")
+@app.post("/incidents/{incident_id}/review/")
+async def review_incident_action(incident_id: str, req: AdminReviewActionRequest):
+    admin_user = require_auth(req.token, roles=["super_admin", "dept_admin", "field_officer"])
+
+    inc = find_incident(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    action = req.action.lower().strip()
+    now_iso = datetime.now().isoformat()
+    decided_by = admin_user.get("display") or admin_user.get("username") or "Admin"
+
+    if action == "approve":
+        inc["review_status"] = "approved"
+        inc["is_removed"] = True
+        inc["review_decision"] = "approved"
+        inc["review_decided_by"] = decided_by
+        inc["review_decided_at"] = now_iso
+        inc.setdefault("history", []).append({
+            "status": inc["status"],
+            "time": now_iso,
+            "by": f"{decided_by} (Removal Approved)"
+        })
+    elif action == "reject":
+        inc["review_status"] = "rejected"
+        inc["is_removed"] = False
+        inc["review_decision"] = "rejected"
+        inc["review_decided_by"] = decided_by
+        inc["review_decided_at"] = now_iso
+        inc.setdefault("history", []).append({
+            "status": inc["status"],
+            "time": now_iso,
+            "by": f"{decided_by} (Removal Request Rejected)"
+        })
+    elif action == "restore":
+        inc["review_status"] = "restored"
+        inc["is_removed"] = False
+        inc["review_decision"] = "restored"
+        inc["review_decided_by"] = decided_by
+        inc["review_decided_at"] = now_iso
+        inc.setdefault("history", []).append({
+            "status": inc["status"],
+            "time": now_iso,
+            "by": f"{decided_by} (Incident Restored)"
+        })
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action. Must be 'approve', 'reject', or 'restore'")
+
+    save_data()
+
+    await broadcast("review_updated", {
+        "id": inc["id"],
+        "ref_id": inc["ref_id"],
+        "review_status": inc["review_status"],
+        "is_removed": inc.get("is_removed", False),
+        "action": action,
+        "decided_by": decided_by,
+        "decided_at": now_iso
+    })
+
+    return {
+        "ok": True,
+        "action": action,
+        "incident": inc
+    }
 
 # ── ADMIN: UPDATE STATUS ──────────────────────────────────────────────
 @app.post("/update")
@@ -811,47 +1023,174 @@ async def update_status(req: UpdateStatusRequest):
 
     return inc
 
-# ── COMMENT ───────────────────────────────────────────────────────────
-@app.post("/comment")
-async def add_comment(req: CommentRequest):
-    inc = incidents.get(req.incident_id)
+# ── COMMENT & DISCUSSION ──────────────────────────────────────────────
+def validate_comment_message(msg: str) -> str:
+    if not msg or not isinstance(msg, str):
+        raise HTTPException(status_code=400, detail="Comment message cannot be empty")
+    cleaned = msg.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Comment message cannot be empty or whitespace only")
+    if len(cleaned) > 2000:
+        raise HTTPException(status_code=400, detail="Comment message cannot exceed 2000 characters")
+    return cleaned
+
+async def handle_add_comment(incident_identifier: str, token: str, raw_message: str):
+    inc = find_incident(incident_identifier)
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    user   = get_session_user(req.token)
-    author = user["display"] if user else "Citizen"
-    role   = user["role"]    if user else "citizen"
+    message = validate_comment_message(raw_message)
+
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required to post comments")
+
+    role = user.get("role", "citizen")
+    is_admin = role in ["super_admin", "dept_admin", "field_officer"]
+
+    if not is_admin:
+        # Strict ownership check for citizen
+        user_id = user.get("user_id")
+        inc_user_id = inc.get("user_id")
+        if not user_id or inc_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden: You can only comment on your own incidents")
+        sender_role = "citizen"
+        sender_id = user_id
+    else:
+        sender_role = "admin"
+        sender_id = user.get("username", "admin")
+
+    author = user.get("display") or user.get("username") or ("Administrator" if is_admin else "Citizen")
+    now_iso = datetime.now().isoformat()
+    comment_id = str(uuid.uuid4())[:8]
 
     comment = {
-        "id": str(uuid.uuid4())[:8], "author": author, "role": role,
-        "message": req.message, "internal": False,
-        "time": datetime.now().isoformat(),
+        "id": comment_id,
+        "comment_id": comment_id,
+        "message": message,
+        "author": author,
+        "sender_id": sender_id,
+        "sender_role": sender_role,
+        "role": role,
+        "created_at": now_iso,
+        "time": now_iso,
+        "internal": False,
     }
+
+    if "comments" not in inc or not isinstance(inc["comments"], list):
+        inc["comments"] = []
     inc["comments"].append(comment)
-    save_data()  # persist
+    save_data()  # persist to disk
 
     # Email citizen if an authority replied publicly
-    if role != "citizen":
+    if sender_role == "admin":
         submitter_email = inc.get("submitter_email", "")
         if submitter_email:
             send_email_async(submitter_email, "Authority replied on " + inc["ref_id"],
                 make_email_html("New Reply on Your Complaint", [
                     "Reference ID: " + inc["ref_id"],
                     "Reply from: " + author,
-                    "Message: " + req.message,
+                    "Message: " + message,
                     "Current Status: " + inc.get("status",""),
                 ])
             )
 
     # Broadcast new comment to all SSE clients
     await broadcast("new_comment", {
-        "incident_id": req.incident_id,
+        "incident_id": inc["id"],
         "ref_id":      inc["ref_id"],
+        "comment_id":  comment_id,
         "author":      author,
-        "message":     req.message,
+        "sender_role": sender_role,
+        "role":        role,
+        "message":     message,
+        "created_at":  now_iso,
+        "time":        now_iso,
     })
 
     return comment
+
+@app.post("/incidents/{incident_id}/comments")
+@app.post("/incidents/{incident_id}/comments/")
+async def add_incident_comment(incident_id: str, req: IncidentCommentRequest):
+    return await handle_add_comment(incident_id, req.token, req.message)
+
+@app.post("/comment")
+async def add_comment(req: CommentRequest):
+    return await handle_add_comment(req.incident_id, req.token, req.message)
+
+@app.get("/incidents/{incident_id}/comments")
+@app.get("/incidents/{incident_id}/comments/")
+def get_incident_comments(incident_id: str, token: str):
+    inc = find_incident(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    role = user.get("role", "citizen")
+    is_admin = role in ["super_admin", "dept_admin", "field_officer"]
+
+    if not is_admin:
+        user_id = user.get("user_id")
+        if not user_id or inc.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden: You cannot view comments for other users' incidents")
+
+    comments = [c for c in inc.get("comments", []) if not c.get("internal")]
+    comments.sort(key=lambda c: c.get("created_at") or c.get("time") or "")
+    return comments
+
+@app.get("/admin/discussions")
+@app.get("/admin/discussions/")
+def get_admin_discussions(token: str, filter_status: Optional[str] = None):
+    require_auth(token, roles=["super_admin", "dept_admin", "field_officer"])
+
+    discussions = []
+    for inc in incidents.values():
+        comments = [c for c in inc.get("comments", []) if not c.get("internal")]
+        if not comments:
+            continue
+
+        comments.sort(key=lambda c: c.get("created_at") or c.get("time") or "")
+        last_c = comments[-1]
+        has_unanswered = (last_c.get("sender_role") == "citizen" or last_c.get("role") == "citizen")
+
+        if filter_status == "unanswered" and not has_unanswered:
+            continue
+
+        discussions.append({
+            "id": inc["id"],
+            "ref_id": inc["ref_id"],
+            "description": inc.get("description", ""),
+            "category": inc.get("category", ""),
+            "status": inc.get("status", ""),
+            "severity": inc.get("severity", ""),
+            "department": inc.get("department", ""),
+            "created_at": inc.get("created_at", ""),
+            "comments": comments,
+            "total_comments": len(comments),
+            "last_comment": last_c,
+            "has_unanswered": has_unanswered,
+            "user_id": inc.get("user_id"),
+        })
+
+    def sort_key(d):
+        unans_weight = 0 if d["has_unanswered"] else 1
+        last_time = d["last_comment"].get("created_at") or d["last_comment"].get("time") or ""
+        try:
+            ts = -datetime.fromisoformat(last_time).timestamp()
+        except Exception:
+            ts = 0
+        return (unans_weight, ts)
+
+    try:
+        discussions.sort(key=sort_key)
+    except Exception:
+        discussions.sort(key=lambda d: 0 if d["has_unanswered"] else 1)
+
+    return discussions
 
 # ── ANALYTICS ────────────────────────────────────────────────────────
 @app.get("/analytics")

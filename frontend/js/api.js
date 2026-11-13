@@ -30,3 +30,41 @@ export async function fetchIncidents() {
     const res = await fetch(`${API_BASE}/incidents`);
     return await res.json();
 }
+
+export async function flagIncidentForReview(incidentId, token) {
+    const userToken = token || localStorage.getItem('up_token');
+    const res = await fetch(`${API_BASE}/incidents/${incidentId}/flag-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: userToken })
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to flag incident for review");
+    }
+    return await res.json();
+}
+
+export async function adminReviewIncident(incidentId, action, token) {
+    const adminToken = token || sessionStorage.getItem('admin_token');
+    const res = await fetch(`${API_BASE}/admin/incidents/${incidentId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: adminToken, action })
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `Failed to ${action} review request`);
+    }
+    return await res.json();
+}
+
+export async function fetchRemovalRequests(token) {
+    const adminToken = token || sessionStorage.getItem('admin_token');
+    const res = await fetch(`${API_BASE}/admin/removal-requests?token=${encodeURIComponent(adminToken)}`);
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to fetch removal requests");
+    }
+    return await res.json();
+}

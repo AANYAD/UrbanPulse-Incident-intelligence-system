@@ -317,64 +317,14 @@ function renderTrackingPanel() {
     }
 }
 
-window.checkStatus = async function(refId) {
-    const el = document.getElementById(`status-${refId}`);
-    el.innerHTML = '<span class="mono" style="font-size:0.7rem;color:#666;">CHECKING...</span>';
-
-    try {
-        const res = await fetch(`http://127.0.0.1:8000/track/${refId}`);
-        if (!res.ok) throw new Error("Not found");
-        const data = await res.json();
-
-        const sc  = statusColor(data.status);
-        const sev = data.severity === "HIGH" ? "#ff4d00" : data.severity === "MEDIUM" ? "#ffcc00" : "#00bfff";
-
-        // Build history timeline
-        const historyHtml = (data.history || []).map(h => `
-            <div style="display:flex;align-items:center;gap:6px;font-size:0.65rem;color:#555;margin-bottom:2px;">
-                <span style="color:${statusColor(h.status)};font-size:0.6rem;">●</span>
-                <b style="color:${statusColor(h.status)}">${h.status}</b>
-                <span>· ${h.by}</span>
-                <span style="color:#333;">${new Date(h.time).toLocaleString()}</span>
-            </div>
-        `).join('');
-
-        // Build public comments thread
-        const comments = data.comments || [];
-        const commentsHtml = comments.length === 0 ? '' : `
-            <div style="margin-top:8px;border-top:1px solid #1a1a1a;padding-top:6px;">
-                <div class="mono" style="font-size:0.6rem;color:#333;margin-bottom:4px;letter-spacing:1px;">AUTHORITY REPLIES</div>
-                ${comments.map(c => `
-                    <div style="padding:5px 8px;margin-bottom:4px;background:#0a1e12;border-left:2px solid #00ff9d;font-size:0.7rem;font-family:monospace;">
-                        <div style="font-size:0.6rem;color:#444;margin-bottom:2px;">${c.author} · ${new Date(c.time).toLocaleTimeString()}</div>
-                        ${c.message}
-                    </div>
-                `).join('')}
-            </div>
-        `;
-
-        el.innerHTML = `
-            <div style="margin-top:8px;padding:10px 12px;background:#111;border:1px solid #222;border-radius:2px;">
-                <div class="mono" style="font-size:0.72rem;line-height:2;">
-                    Status: <b style="color:${sc};">${data.status}</b><br>
-                    Severity: <b style="color:${sev};">${data.severity}</b><br>
-                    Dept: <b style="color:#aaa;">${data.department}</b>
-                    ${data.input_method === "voice" ? `<br>Method: <b style="color:#00ff9d;">🎙 VOICE (${data.original_language || 'Voice'})</b>` : ''}
-                    ${data.resolved_at ? `<br><span style="color:#00ff9d;font-size:0.68rem;">✓ Resolved ${new Date(data.resolved_at).toLocaleString()}</span>` : ''}
-                </div>
-                ${data.original_transcript ? `
-                    <div style="margin-top:6px;padding:6px 8px;background:#141b17;border-left:2px solid #00ff9d;font-size:0.7rem;color:#88b598;">
-                        <b>Original Hindi Transcript:</b> "${data.original_transcript}"
-                    </div>
-                ` : ''}
-                ${historyHtml ? `<div style="margin-top:8px;border-top:1px solid #1a1a1a;padding-top:6px;">${historyHtml}</div>` : ''}
-                ${commentsHtml}
-            </div>
-        `;
-    } catch (err) {
-        el.innerHTML = '<span class="mono" style="font-size:0.7rem;color:#ff4d00;">Could not fetch status.</span>';
-    }
-};
+// Check status is managed by index.html with toggle, click-outside, and ESC handling.
+if (!window.checkStatus) {
+    window.checkStatus = function(refId, event) {
+        if (window.toggleCheckStatus) {
+            return window.toggleCheckStatus(refId, event);
+        }
+    };
+}
 
 // Init on load
 window.addEventListener("DOMContentLoaded", () => {
