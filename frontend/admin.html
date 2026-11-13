@@ -65,6 +65,22 @@
         .dept-badge { font-family:var(--mono); font-size:0.62rem; color:#777; border:1px solid #2a2a2a; padding:0.12rem 0.4rem; border-radius:2px; display:inline-block; }
         .time-ago   { font-family:var(--mono); font-size:0.68rem; color:#444; }
 
+        /* DISCUSSION CARDS */
+        .discussion-card {
+            background: #111;
+            border: 1px solid var(--border);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.25rem;
+            display: block !important;
+            border-radius: 4px;
+            box-sizing: border-box;
+            width: 100%;
+            transition: 0.2s;
+        }
+        .discussion-card:hover {
+            border-color: #444;
+        }
+
         /* SLA BADGES */
         .sla-badge { font-family:var(--mono); font-size:0.62rem; padding:0.2rem 0.5rem; border-radius:3px; display:inline-block; margin-top:4px; }
         .sla-badge.ok       { background:#1a3a1a; color:var(--green);  border:1px solid #00ff9d33; }
@@ -101,6 +117,26 @@
         .comment-send-btn { background:transparent; border:1px solid #333; color:#777; font-family:var(--mono); font-size:0.65rem; padding:0.3rem 0.7rem; cursor:pointer; white-space:nowrap; }
         .comment-send-btn:hover { border-color:var(--green); color:var(--green); }
 
+        /* REMOVAL REQUEST ACTION BUTTONS */
+        .btn-approve {
+            background: transparent; border: 1px solid var(--accent); color: var(--accent);
+            padding: 0.45rem 0.9rem; cursor: pointer; font-family: var(--mono); font-size: 0.7rem;
+            text-transform: uppercase; transition: 0.2s;
+        }
+        .btn-approve:hover { background: var(--accent); color: white; }
+        .btn-reject {
+            background: transparent; border: 1px solid #555; color: #888;
+            padding: 0.45rem 0.9rem; cursor: pointer; font-family: var(--mono); font-size: 0.7rem;
+            text-transform: uppercase; transition: 0.2s;
+        }
+        .btn-reject:hover { border-color: #aaa; color: white; }
+        .btn-restore {
+            background: transparent; border: 1px solid var(--green); color: var(--green);
+            padding: 0.45rem 0.9rem; cursor: pointer; font-family: var(--mono); font-size: 0.7rem;
+            text-transform: uppercase; transition: 0.2s;
+        }
+        .btn-restore:hover { background: var(--green); color: black; }
+
         .empty-state { text-align:center; color:#333; margin-top:4rem; font-family:var(--mono); }
         .dark-tiles {
             filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
@@ -123,6 +159,18 @@
         <div class="auth-hints">
             superadmin / super123 &nbsp;|&nbsp; fire_dept / fire123<br>
             water_dept / water123 &nbsp;|&nbsp; officer1 / field123
+        </div>
+    </div>
+</div>
+
+<!-- ADMIN CONFIRMATION MODAL -->
+<div id="adminConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:3000;align-items:center;justify-content:center;">
+    <div style="background:#141414;border:1px solid #444;padding:2rem;width:90%;max-width:440px;box-shadow:0 10px 40px #000;">
+        <h3 id="adminConfirmTitle" class="display" style="font-size:1.2rem;margin-bottom:0.8rem;color:white;">CONFIRM ACTION</h3>
+        <p id="adminConfirmMsg" class="mono" style="font-size:0.78rem;color:#bbb;line-height:1.6;margin-bottom:1.5rem;white-space:pre-line;"></p>
+        <div style="display:flex;gap:1rem;">
+            <button type="button" onclick="closeAdminConfirm()" style="flex:1;background:transparent;border:1px solid #444;color:#aaa;padding:0.7rem;cursor:pointer;font-family:var(--mono);text-transform:uppercase;">Cancel</button>
+            <button type="button" id="adminConfirmBtn" onclick="executeAdminConfirm()" style="flex:1;background:white;color:black;border:none;padding:0.7rem;cursor:pointer;font-family:var(--display);text-transform:uppercase;">Confirm</button>
         </div>
     </div>
 </div>
@@ -161,6 +209,12 @@
     <main class="feed">
         <div class="tab-bar">
             <button class="feed-tab active" id="tab-btn-incidents" onclick="switchTab('incidents')">Incidents</button>
+            <button class="feed-tab"        id="tab-btn-removal-requests" onclick="switchTab('removal-requests')">
+                Incident Removal Requests <span id="removalBadge" style="display:none;background:var(--accent);color:white;font-size:0.6rem;padding:2px 6px;border-radius:10px;margin-left:4px;">0</span>
+            </button>
+            <button class="feed-tab"        id="tab-btn-discussions" onclick="switchTab('discussions')">
+                Incident Discussions <span id="unansweredDiscussionBadge" style="display:none;background:#f59e0b;color:#000;font-size:0.6rem;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px;">0</span>
+            </button>
             <button class="feed-tab"        id="tab-btn-analytics" onclick="switchTab('analytics')">Analytics</button>
         </div>
 
@@ -201,6 +255,34 @@
             <div id="incidentList"></div>
         </div>
 
+        <!-- INCIDENT REMOVAL REQUESTS TAB -->
+        <div id="tab-removal-requests" style="display:none;">
+            <div class="feed-header">
+                <div>
+                    <span class="mono" style="font-size:0.85rem;color:var(--accent);font-weight:700;">INCIDENT REMOVAL REQUESTS</span>
+                    <div class="mono" style="font-size:0.7rem;color:#777;margin-top:4px;">Manage citizen requests to review or remove submitted reports</div>
+                </div>
+                <span class="mono" style="font-size:0.75rem;color:#666;" id="removalStats">TOTAL: 0</span>
+            </div>
+            <div id="removalRequestsList"></div>
+        </div>
+
+        <!-- INCIDENT DISCUSSIONS TAB -->
+        <div id="tab-discussions" style="display:none;">
+            <div class="feed-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                <div>
+                    <span class="mono" style="font-size:0.85rem;color:#38bdf8;font-weight:700;">INCIDENT DISCUSSIONS</span>
+                    <div class="mono" style="font-size:0.7rem;color:#777;margin-top:4px;">Citizen communication &amp; administrative reply channel</div>
+                </div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <button class="filter-clear active" id="filter-disc-all" onclick="filterDiscussions('all')" style="border-color:#38bdf8;color:#38bdf8;">ALL</button>
+                    <button class="filter-clear" id="filter-disc-unanswered" onclick="filterDiscussions('unanswered')" style="border-color:#f59e0b;color:#f59e0b;">AWAITING ADMIN REPLY (<span id="unansweredCount">0</span>)</button>
+                    <span class="mono" style="font-size:0.75rem;color:#666;margin-left:8px;" id="discussionsStats">TOTAL: 0</span>
+                </div>
+            </div>
+            <div id="discussionsList" style="padding:1rem 0;"></div>
+        </div>
+
         <!-- ANALYTICS TAB -->
         <div id="tab-analytics" style="display:none;">
             <div id="analyticsPanel"></div>
@@ -209,7 +291,10 @@
 </div>
 
 <script>
-var API = 'http://127.0.0.1:8000';
+var API = (function() {
+    if (window.location.port === '8000') return '';
+    return 'http://127.0.0.1:8000';
+})();
 var adminMap = null, adminLayer = null, heatLayer = null, refreshTimer = null;
 var currentToken = null, currentRole = null, currentDisplay = null;
 var allIncidents = [];
@@ -243,6 +328,21 @@ function connectSSE() {
     sseSource.addEventListener('new_comment', function(e) {
         var d = JSON.parse(e.data);
         showToast('New comment on ' + d.ref_id, 'blue');
+        loadData();
+        loadAdminDiscussions();
+    });
+
+    // Removal review requested by citizen
+    sseSource.addEventListener('review_requested', function(e) {
+        var d = JSON.parse(e.data);
+        showToast('Removal requested for: ' + d.ref_id, 'accent');
+        loadData();
+    });
+
+    // Review decision made by admin
+    sseSource.addEventListener('review_updated', function(e) {
+        var d = JSON.parse(e.data);
+        showToast('Review updated for: ' + d.ref_id + ' → ' + d.review_status, 'green');
         loadData();
     });
 
@@ -326,8 +426,12 @@ function switchTab(tab) {
     document.querySelectorAll('.feed-tab').forEach(function(b) { b.classList.remove('active'); });
     document.getElementById('tab-btn-' + tab).classList.add('active');
     document.getElementById('tab-incidents').style.display = tab === 'incidents' ? '' : 'none';
+    document.getElementById('tab-removal-requests').style.display = tab === 'removal-requests' ? '' : 'none';
+    document.getElementById('tab-discussions').style.display = tab === 'discussions' ? '' : 'none';
     document.getElementById('tab-analytics').style.display = tab === 'analytics' ? '' : 'none';
     if (tab === 'analytics') loadAnalytics();
+    if (tab === 'removal-requests') loadRemovalRequests();
+    if (tab === 'discussions') loadAdminDiscussions();
 }
 
 // LOAD
@@ -337,12 +441,14 @@ async function loadData() {
         document.getElementById('auth-screen').style.display = 'none';
     }
     try {
-        var res = await fetch(API + '/incidents');
+        var res = await fetch(API + '/incidents?include_removed=true');
         if (!res.ok) throw new Error('GET /incidents returned ' + res.status);
         allIncidents = await res.json();
         renderStats(allIncidents);
         renderIncidentList(allIncidents);
         renderMap(allIncidents);
+        loadRemovalRequests();
+        loadAdminDiscussions();
         document.getElementById('lastUpdate').innerText = 'LAST SYNC: ' + new Date().toLocaleTimeString();
     } catch(err) {
         document.getElementById('incidentList').innerHTML = '<div class="empty-state">[ BACKEND ERROR: ' + err.message + ' ]</div>';
@@ -351,9 +457,184 @@ async function loadData() {
 
 // STATS
 function renderStats(list) {
-    document.getElementById('totalOpen').innerText     = String(list.filter(function(i){return i.status==='OPEN';}).length).padStart(2,'0');
-    document.getElementById('totalResolved').innerText = String(list.filter(function(i){return i.status==='RESOLVED';}).length).padStart(2,'0');
-    document.getElementById('totalSLA').innerText      = String(list.filter(function(i){return i.status==='OPEN' && slaBreached(i);}).length).padStart(2,'0');
+    var activeList = list.filter(function(i){return !i.is_removed;});
+    document.getElementById('totalOpen').innerText     = String(activeList.filter(function(i){return i.status==='OPEN';}).length).padStart(2,'0');
+    document.getElementById('totalResolved').innerText = String(activeList.filter(function(i){return i.status==='RESOLVED';}).length).padStart(2,'0');
+    document.getElementById('totalSLA').innerText      = String(activeList.filter(function(i){return i.status==='OPEN' && slaBreached(i);}).length).padStart(2,'0');
+}
+
+// REMOVAL REQUESTS
+var allRemovalRequests = [];
+
+async function loadRemovalRequests() {
+    if (!currentToken) return;
+    try {
+        var res = await fetch(API + '/admin/removal-requests?token=' + encodeURIComponent(currentToken));
+        if (!res.ok) return;
+        allRemovalRequests = await res.json();
+        renderRemovalRequests(allRemovalRequests);
+        updateRemovalBadge(allRemovalRequests);
+    } catch(e) {
+        console.warn('Error loading removal requests', e);
+    }
+}
+
+function updateRemovalBadge(list) {
+    var pendingCount = list.filter(function(r) { return r.review_status === 'pending'; }).length;
+    var badge = document.getElementById('removalBadge');
+    if (badge) {
+        badge.innerText = pendingCount;
+        badge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
+    }
+    var statsEl = document.getElementById('removalStats');
+    if (statsEl) {
+        statsEl.innerText = 'TOTAL: ' + list.length + ' | PENDING: ' + pendingCount;
+    }
+}
+
+function renderRemovalRequests(list) {
+    var container = document.getElementById('removalRequestsList');
+    if (!container) return;
+    if (!list || list.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="margin-top:2rem;">[ NO REMOVAL REQUESTS RECORDED ]</div>';
+        return;
+    }
+    container.innerHTML = '';
+    list.forEach(function(req) {
+        var card = document.createElement('div');
+        card.className = 'incident-card';
+        card.style.display = 'block';
+        card.style.marginBottom = '1.2rem';
+        card.style.borderColor = req.review_status === 'pending' ? 'var(--accent)' : '#333';
+
+        var stColor = req.status === 'RESOLVED' ? '#00ff9d' : req.status === 'IN PROGRESS' ? '#00aaff' : req.status === 'UNDER REVIEW' ? '#ffcc00' : '#ff4d00';
+        var revBadge = '';
+        if (req.review_status === 'pending') {
+            revBadge = '<span style="background:#3a2f00;color:#ffcc00;padding:2px 8px;border:1px solid #ffcc00;font-size:0.68rem;font-weight:bold;">PENDING REVIEW</span>';
+        } else if (req.review_status === 'approved' || req.is_removed) {
+            revBadge = '<span style="background:#3a0a00;color:var(--accent);padding:2px 8px;border:1px solid var(--accent);font-size:0.68rem;font-weight:bold;">REMOVAL APPROVED (DELISTED)</span>';
+        } else if (req.review_status === 'rejected') {
+            revBadge = '<span style="background:#222;color:#aaa;padding:2px 8px;border:1px solid #444;font-size:0.68rem;font-weight:bold;">REQUEST REJECTED (ACTIVE)</span>';
+        } else if (req.review_status === 'restored') {
+            revBadge = '<span style="background:#0a2a1a;color:var(--green);padding:2px 8px;border:1px solid var(--green);font-size:0.68rem;font-weight:bold;">RESTORED (REPUBLISHED)</span>';
+        }
+
+        var decisionInfo = '';
+        if (req.review_decision && req.review_decided_at) {
+            decisionInfo = '<div class="mono" style="font-size:0.68rem;color:#777;margin-top:6px;">Decision: <b style="color:#aaa;">' + req.review_decision.toUpperCase() + '</b> by ' + (req.review_decided_by || 'Admin') + ' on ' + new Date(req.review_decided_at).toLocaleString() + '</div>';
+        }
+
+        var actionButtons = '<div style="display:flex;gap:0.6rem;margin-top:1rem;flex-wrap:wrap;">';
+        if (req.review_status === 'pending') {
+            actionButtons += '<button type="button" class="btn-approve" onclick="openAdminConfirm(\'' + req.id + '\', \'' + req.ref_id + '\', \'approve\')">✓ Approve Removal</button>';
+            actionButtons += '<button type="button" class="btn-reject" onclick="openAdminConfirm(\'' + req.id + '\', \'' + req.ref_id + '\', \'reject\')">✗ Reject Request</button>';
+        } else if (req.is_removed || req.review_status === 'approved') {
+            actionButtons += '<button type="button" class="btn-restore" onclick="openAdminConfirm(\'' + req.id + '\', \'' + req.ref_id + '\', \'restore\')">↺ Restore Incident</button>';
+        } else if (req.review_status === 'rejected') {
+            actionButtons += '<button type="button" class="btn-approve" onclick="openAdminConfirm(\'' + req.id + '\', \'' + req.ref_id + '\', \'approve\')">✓ Approve Removal</button>';
+        }
+        actionButtons += '</div>';
+
+        card.innerHTML = ''
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem;flex-wrap:wrap;gap:6px;">'
+            + '  <div>'
+            + '    <b class="mono" style="color:var(--green);font-size:0.95rem;letter-spacing:1px;">' + req.ref_id + '</b>'
+            + '    <span class="dept-badge" style="margin-left:8px;">' + (req.category || 'General') + '</span>'
+            + '    <span class="dept-badge" style="margin-left:4px;">' + (req.department || '') + '</span>'
+            + '  </div>'
+            + '  <div>' + revBadge + '</div>'
+            + '</div>'
+            + '<div class="mono" style="font-size:0.75rem;color:#888;line-height:1.7;">'
+            + '  Submitting User: <b style="color:#eee;">' + (req.submitting_user || req.review_requested_by || 'Unknown') + '</b><br>'
+            + '  Request Date: <span style="color:#aaa;">' + (req.review_requested_at ? new Date(req.review_requested_at).toLocaleString() : 'N/A') + '</span><br>'
+            + '  Current Status: <b style="color:' + stColor + ';">' + req.status + '</b>'
+            + '</div>'
+            + '<div class="mono" style="font-size:0.8rem;color:#ddd;background:#181818;padding:8px 10px;margin-top:8px;border-left:2px solid var(--accent);line-height:1.5;">'
+            +   req.description
+            + '</div>'
+            + decisionInfo
+            + actionButtons;
+
+        container.appendChild(card);
+    });
+}
+
+// CONFIRMATION MODAL LOGIC FOR ADMIN
+var adminConfirmIncidentId = null;
+var adminConfirmRefId = null;
+var adminConfirmAction = null;
+
+function openAdminConfirm(id, refId, action) {
+    adminConfirmIncidentId = id;
+    adminConfirmRefId = refId;
+    adminConfirmAction = action;
+
+    var modal = document.getElementById('adminConfirmModal');
+    var titleEl = document.getElementById('adminConfirmTitle');
+    var msgEl = document.getElementById('adminConfirmMsg');
+    var btn = document.getElementById('adminConfirmBtn');
+
+    if (action === 'approve') {
+        titleEl.innerText = 'APPROVE INCIDENT REMOVAL';
+        titleEl.style.color = 'var(--accent)';
+        msgEl.innerText = 'Are you sure you want to APPROVE removal for incident ' + refId + '?\n\nThis incident will be removed from active public listings and the heatmap, but retained internally for audit and restoration.';
+        btn.innerText = 'Confirm Removal';
+        btn.style.background = 'var(--accent)';
+        btn.style.color = 'white';
+    } else if (action === 'reject') {
+        titleEl.innerText = 'REJECT REMOVAL REQUEST';
+        titleEl.style.color = '#ffcc00';
+        msgEl.innerText = 'Are you sure you want to REJECT the removal request for incident ' + refId + '?\n\nThe incident will remain active in all public listings.';
+        btn.innerText = 'Confirm Rejection';
+        btn.style.background = '#ffcc00';
+        btn.style.color = 'black';
+    } else if (action === 'restore') {
+        titleEl.innerText = 'RESTORE REMOVED INCIDENT';
+        titleEl.style.color = 'var(--green)';
+        msgEl.innerText = 'Are you sure you want to RESTORE incident ' + refId + '?\n\nThis incident will be republished to active public listings and the heatmap.';
+        btn.innerText = 'Confirm Restoration';
+        btn.style.background = 'var(--green)';
+        btn.style.color = 'black';
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeAdminConfirm() {
+    var modal = document.getElementById('adminConfirmModal');
+    if (modal) modal.style.display = 'none';
+    adminConfirmIncidentId = null;
+    adminConfirmRefId = null;
+    adminConfirmAction = null;
+}
+
+async function executeAdminConfirm() {
+    if (!adminConfirmIncidentId || !adminConfirmAction || !currentToken) return;
+    var btn = document.getElementById('adminConfirmBtn');
+    btn.innerText = 'PROCESSING...';
+    btn.disabled = true;
+
+    try {
+        var res = await fetch(API + '/admin/incidents/' + adminConfirmIncidentId + '/review', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ token: currentToken, action: adminConfirmAction })
+        });
+        var data = await res.json();
+        closeAdminConfirm();
+        if (!res.ok) {
+            alert('Action failed: ' + (data.detail || res.status));
+            return;
+        }
+        showToast('Incident ' + adminConfirmRefId + ' review action (' + adminConfirmAction + ') completed', 'green');
+        loadData();
+        loadRemovalRequests();
+    } catch(err) {
+        closeAdminConfirm();
+        alert('Network error: ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 // FILTERS
@@ -462,6 +743,8 @@ function renderIncidentList(list) {
             +'<span style="color:#444;font-size:0.7rem;">'+inc.latitude+', '+inc.longitude+'</span><br>'
             +(inc.department ? '<span class="dept-badge">'+inc.department+'</span> ' : '')
             +(inc.ref_id     ? '<span class="dept-badge">'+inc.ref_id+'</span> '     : '')
+            +(inc.is_removed ? '<span class="dept-badge" style="background:#3a0a00;border-color:var(--accent);color:var(--accent);">REMOVED FROM PUBLIC</span> ' : '')
+            +(inc.review_status === 'pending' ? '<span class="dept-badge" style="background:#3a2f00;border-color:#ffcc00;color:#ffcc00;">REMOVAL PENDING</span> ' : '')
             +(inc.input_method === 'voice' ? '<span class="dept-badge" style="background:#0c2818;border-color:#00ff9d;color:#00ff9d;">🎙 VOICE ('+(inc.original_language||'Voice')+')</span> ' : '')
             +(inc.created_at ? '<span class="time-ago">'+timeAgo(inc.created_at)+'</span>' : '')
             +(inc.original_transcript ? '<div style="margin-top:4px;padding:4px 8px;background:#141b17;border-left:2px solid #00ff9d;font-size:0.72rem;color:#88b598;"><b>Original Transcript ('+(inc.original_language||'hi-IN')+'):</b> '+inc.original_transcript+'</div>' : '')
@@ -607,7 +890,7 @@ function renderMap(list) {
     if (heatLayer) { adminMap.removeLayer(heatLayer); heatLayer = null; }
 
     var points = [], heat = [], wt = {HIGH:1.0,MEDIUM:0.6,LOW:0.3};
-    list.filter(function(i){return i.status==='OPEN';}).forEach(function(i) {
+    list.filter(function(i){return i.status==='OPEN' && !i.is_removed;}).forEach(function(i) {
         var lat = parseFloat(i.latitude), lng = parseFloat(i.longitude);
         if (isNaN(lat)||isNaN(lng)) return;
         points.push([lat,lng]);
@@ -631,6 +914,193 @@ function renderMap(list) {
     if (points.length) adminMap.fitBounds(L.latLngBounds(points).pad(0.4));
     setTimeout(function(){adminMap.invalidateSize();},150);
 }
+
+// ── HELPER: ESCAPE HTML ───────────────────────────────────────────────
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// ── INCIDENT DISCUSSIONS (ADMIN) ──────────────────────────────────────
+var cachedDiscussions = [];
+var currentDiscussionFilter = 'all';
+
+async function loadAdminDiscussions() {
+    if (!currentToken) return;
+    try {
+        var res = await fetch(API + '/admin/discussions?token=' + encodeURIComponent(currentToken));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        cachedDiscussions = await res.json();
+        renderAdminDiscussions();
+        updateDiscussionBadges();
+    } catch(err) {
+        console.error('Failed to load discussions:', err);
+        var container = document.getElementById('discussionsList');
+        if (container) container.innerHTML = '<div class="empty-state">[ ERROR LOADING DISCUSSIONS: ' + err.message + ' ]</div>';
+    }
+}
+
+function updateDiscussionBadges() {
+    var unanswered = cachedDiscussions.filter(function(d) { return d.has_unanswered; }).length;
+    var badge = document.getElementById('unansweredDiscussionBadge');
+    if (badge) {
+        if (unanswered > 0) {
+            badge.innerText = unanswered;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+    var countEl = document.getElementById('unansweredCount');
+    if (countEl) countEl.innerText = unanswered;
+    var statsEl = document.getElementById('discussionsStats');
+    if (statsEl) statsEl.innerText = 'TOTAL: ' + cachedDiscussions.length;
+}
+
+function filterDiscussions(f) {
+    currentDiscussionFilter = f;
+    var allBtn = document.getElementById('filter-disc-all');
+    var unansBtn = document.getElementById('filter-disc-unanswered');
+    if (allBtn) allBtn.classList.toggle('active', f === 'all');
+    if (unansBtn) unansBtn.classList.toggle('active', f === 'unanswered');
+    renderAdminDiscussions();
+}
+
+function renderAdminDiscussions() {
+    var container = document.getElementById('discussionsList');
+    if (!container) return;
+
+    var list = cachedDiscussions.slice();
+    if (currentDiscussionFilter === 'unanswered') {
+        list = list.filter(function(d) { return d.has_unanswered; });
+    }
+
+    if (list.length === 0) {
+        var emptyMsg = currentDiscussionFilter === 'unanswered' ? 'No discussions awaiting admin reply.' : 'No incident discussions found.';
+        container.innerHTML = '<div class="empty-state">[ ' + emptyMsg + ' ]</div>';
+        return;
+    }
+
+    container.innerHTML = list.map(function(d) {
+        var statusColor = d.status === 'RESOLVED' ? '#00ff9d' : '#ffcc00';
+        var awaitingBadge = d.has_unanswered
+            ? '<span class="mono" style="background:#451a03;border:1px solid #f59e0b;color:#f59e0b;font-size:0.65rem;padding:2px 8px;border-radius:2px;font-weight:700;">⚠️ AWAITING ADMIN REPLY</span>'
+            : '<span class="mono" style="background:#064e3b;border:1px solid #10b981;color:#10b981;font-size:0.65rem;padding:2px 8px;border-radius:2px;">✓ REPLIED</span>';
+
+        var commentsHtml = (d.comments || []).map(function(c) {
+            var isAdmin = (c.sender_role === 'admin' || c.role !== 'citizen');
+            var bg = isAdmin ? '#0f172a' : '#18181b';
+            var border = isAdmin ? '#38bdf8' : '#10b981';
+            var roleBadge = isAdmin
+                ? '<span class="mono" style="color:#38bdf8;font-size:0.65rem;font-weight:700;">ADMINISTRATOR</span>'
+                : '<span class="mono" style="color:#10b981;font-size:0.65rem;font-weight:700;">CITIZEN</span>';
+            var authorName = escapeHtml(c.author || (isAdmin ? 'Admin' : 'Citizen'));
+            var timeStr = c.created_at || c.time ? new Date(c.created_at || c.time).toLocaleString() : '';
+            var msgText = escapeHtml(c.message || '');
+
+            return '<div style="margin-bottom:10px;padding:10px 12px;background:' + bg + ';border-left:3px solid ' + border + ';border-radius:3px;box-sizing:border-box;width:100%;">' +
+                   '  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">' +
+                   '    <div style="display:flex;gap:8px;align-items:center;">' + roleBadge + '<span class="mono" style="font-size:0.75rem;color:#f1f5f9;font-weight:600;">' + authorName + '</span></div>' +
+                   '    <span class="mono" style="font-size:0.68rem;color:#64748b;">' + timeStr + '</span>' +
+                   '  </div>' +
+                   '  <div style="font-size:0.82rem;color:#e2e8f0;white-space:pre-wrap;line-height:1.5;">' + msgText + '</div>' +
+                   '</div>';
+        }).join('');
+
+        return '<div class="discussion-card" id="admin-disc-' + d.ref_id + '" style="border-left:4px solid ' + (d.has_unanswered ? '#f59e0b' : '#38bdf8') + ' !important;">' +
+               '  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #1e293b;">' +
+               '    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+               '      <span class="mono" style="font-size:1rem;font-weight:700;color:var(--accent);letter-spacing:1px;">' + d.ref_id + '</span>' +
+               '      <span class="mono" style="font-size:0.68rem;padding:2px 8px;border-radius:2px;border:1px solid ' + statusColor + ';color:' + statusColor + ';background:' + statusColor + '15;font-weight:600;">' + (d.status || 'OPEN') + '</span>' +
+               '      <span class="mono" style="font-size:0.75rem;color:#94a3b8;">' + (d.category || '') + ' · <b style="color:#cbd5e1;">' + (d.department || '') + '</b></span>' +
+               '    </div>' +
+               '    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+               '      ' + awaitingBadge +
+               '      <button class="track-btn" style="font-size:0.7rem;padding:4px 10px;border-color:#475569;color:#cbd5e1;background:transparent;cursor:pointer;" onclick="jumpToIncident(\'' + d.ref_id + '\')">VIEW IN FEED →</button>' +
+               '    </div>' +
+               '  </div>' +
+               '  <div style="margin:10px 0 14px 0;font-size:0.82rem;color:#cbd5e1;background:#090d12;padding:10px 14px;border-radius:3px;border:1px dashed #263445;line-height:1.5;box-sizing:border-box;width:100%;">' +
+               '    <b style="color:#64748b;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.5px;display:block;margin-bottom:4px;">ORIGINAL COMPLAINT DESCRIPTION:</b>' +
+               '    ' + escapeHtml(d.description || '') +
+               '  </div>' +
+               '  <div style="margin-bottom:14px;max-height:280px;overflow-y:auto;padding-right:4px;">' +
+               '    ' + commentsHtml +
+               '  </div>' +
+               '  <div style="background:#090d12;padding:12px;border-radius:3px;border:1px solid #1e293b;box-sizing:border-box;width:100%;">' +
+               '    <div class="mono" style="font-size:0.72rem;color:#38bdf8;margin-bottom:6px;font-weight:600;letter-spacing:0.5px;">💬 REPLY AS ADMINISTRATOR</div>' +
+               '    <textarea id="admin-disc-reply-' + d.ref_id + '" placeholder="Type administrative response to citizen..." style="width:100%;min-height:65px;background:#020617;border:1px solid #334155;color:#f8fafc;padding:8px 10px;font-size:0.82rem;font-family:inherit;border-radius:3px;box-sizing:border-box;resize:vertical;line-height:1.4;"></textarea>' +
+               '    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px;">' +
+               '      <span id="admin-disc-msg-' + d.ref_id + '" class="mono" style="font-size:0.72rem;color:#ef4444;"></span>' +
+               '      <button class="action-btn" style="border-color:#38bdf8;color:#38bdf8;background:#0284c722;font-size:0.75rem;padding:6px 14px;cursor:pointer;font-weight:600;" id="admin-disc-btn-' + d.ref_id + '" onclick="sendAdminReply(\'' + (d.id || d.ref_id) + '\', \'' + d.ref_id + '\')">SEND REPLY →</button>' +
+               '    </div>' +
+               '  </div>' +
+               '</div>';
+    }).join('');
+}
+
+async function sendAdminReply(incidentId, refId) {
+    var txtEl = document.getElementById('admin-disc-reply-' + refId);
+    var msgEl = document.getElementById('admin-disc-msg-' + refId);
+    var btnEl = document.getElementById('admin-disc-btn-' + refId);
+    if (!txtEl || !btnEl) return;
+
+    var text = txtEl.value.trim();
+    if (!text) {
+        if (msgEl) { msgEl.innerText = 'Reply cannot be empty'; msgEl.style.color = '#ef4444'; }
+        return;
+    }
+    if (text.length > 2000) {
+        if (msgEl) { msgEl.innerText = 'Reply cannot exceed 2000 characters'; msgEl.style.color = '#ef4444'; }
+        return;
+    }
+
+    btnEl.disabled = true;
+    btnEl.innerText = 'SENDING...';
+    if (msgEl) msgEl.innerText = '';
+
+    try {
+        var res = await fetch(API + '/incidents/' + encodeURIComponent(incidentId) + '/comments', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ token: currentToken, message: text })
+        });
+        var data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'Failed to send reply');
+        }
+        txtEl.value = '';
+        if (msgEl) {
+            msgEl.innerText = '✓ Reply posted';
+            msgEl.style.color = '#10b981';
+            setTimeout(function() { if (msgEl) msgEl.innerText = ''; }, 3000);
+        }
+        await loadAdminDiscussions();
+    } catch(err) {
+        if (msgEl) {
+            msgEl.innerText = err.message;
+            msgEl.style.color = '#ef4444';
+        }
+    } finally {
+        btnEl.disabled = false;
+        btnEl.innerText = 'SEND REPLY →';
+    }
+}
+
+function jumpToIncident(refId) {
+    switchTab('incidents');
+    var el = document.getElementById('card-' + refId);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.boxShadow = '0 0 12px #38bdf8';
+        setTimeout(function() { el.style.boxShadow = ''; }, 2500);
+    }
+}
+
 </script>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>

@@ -248,11 +248,54 @@
             transition: 0.2s; display: inline-block;
         }
         .track-btn:hover { border-color: var(--secondary-accent); color: var(--secondary-accent); }
-        .track-status { margin-top: 6px; }
+        .track-btn.active {
+            background: #0f2317;
+            border-color: var(--secondary-accent);
+            color: var(--secondary-accent);
+            font-weight: bold;
+        }
+        .track-status {
+            margin-top: 6px;
+            display: none;
+        }
+        .track-status.open {
+            display: block;
+            animation: fadeInStatus 0.15s ease-out;
+        }
+        @keyframes fadeInStatus {
+            from { opacity: 0; transform: translateY(-3px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         .status-pill {
             display: inline-block; font-family: var(--font-mono); font-size: 0.7rem;
             padding: 0.2rem 0.6rem; border-radius: 3px; margin-top: 4px;
         }
+
+        /* TRACKING FILTER & SORT CONTROLS */
+        .tracking-filter-btn {
+            background: transparent; border: 1px solid #333; color: #888;
+            font-family: var(--font-mono); font-size: 0.68rem; padding: 0.3rem 0.6rem;
+            cursor: pointer; text-transform: uppercase; transition: 0.2s all;
+            display: inline-flex; align-items: center; gap: 5px; border-radius: 2px;
+        }
+        .tracking-filter-btn:hover { border-color: #666; color: #eee; }
+        .tracking-filter-btn.active {
+            background: #0f2317; border-color: var(--secondary-accent);
+            color: var(--secondary-accent); font-weight: bold;
+        }
+        .tracking-filter-btn .filter-count {
+            font-size: 0.62rem; background: #222; color: #aaa;
+            padding: 1px 5px; border-radius: 2px;
+        }
+        .tracking-filter-btn.active .filter-count {
+            background: rgba(0, 255, 157, 0.15); color: var(--secondary-accent);
+        }
+        .tracking-sort-select {
+            background: #141414; border: 1px solid #333; color: #ccc;
+            font-family: var(--font-mono); font-size: 0.68rem; padding: 0.25rem 0.45rem;
+            border-radius: 2px; outline: none; cursor: pointer; transition: 0.2s;
+        }
+        .tracking-sort-select:focus { border-color: var(--secondary-accent); }
 
         /* AUTH OVERLAY */
         .auth-overlay {
@@ -402,6 +445,20 @@
         </div>
     </div>
 
+    <!-- CONFIRM FLAG FOR REVIEW MODAL -->
+    <div class="modal-overlay" id="confirmFlagModal">
+        <div class="modal-box" id="confirmFlagBox" style="border-color:var(--accent-color);">
+            <div class="modal-title" style="color:var(--accent-color);">FLAG FOR REVIEW</div>
+            <div class="modal-message" id="confirmFlagMsg">
+                Are you sure you want to flag this incident for administrator review and potential removal?
+            </div>
+            <div style="display:flex;gap:1rem;margin-top:1.5rem;">
+                <button type="button" class="modal-btn" onclick="closeConfirmFlagModal()" style="background:transparent;border:1px solid #444;color:#aaa;flex:1;">Cancel</button>
+                <button type="button" class="modal-btn" id="confirmFlagBtn" onclick="submitFlagForReview()" style="background:var(--accent-color);color:white;flex:1;">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <section class="hero">
         <div style="position: relative; width: 100%;">
             <h1 class="hero-title">Report</h1>
@@ -441,7 +498,36 @@
 
                     <!-- CITIZEN TRACKING PANEL -->
                     <div class="tracking-panel">
-                        <div class="tracking-title">📋 My Submitted Reports</div>
+                        <div class="tracking-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <span>📋 My Submitted Reports</span>
+                            <span id="trackingTotalBadge" class="mono" style="font-size:0.68rem;color:#888;"></span>
+                        </div>
+
+                        <!-- FILTER & SORT CONTROLS -->
+                        <div class="tracking-controls" id="trackingControls" style="margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid #222;">
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;">
+                                <div class="tracking-filters" style="display:flex;gap:4px;flex-wrap:wrap;">
+                                    <button type="button" class="tracking-filter-btn active" id="filterBtnAll" onclick="setTrackingFilter('all')">
+                                        ALL <span class="filter-count" id="countAll">0</span>
+                                    </button>
+                                    <button type="button" class="tracking-filter-btn" id="filterBtnActive" onclick="setTrackingFilter('active')">
+                                        ACTIVE <span class="filter-count" id="countActive">0</span>
+                                    </button>
+                                    <button type="button" class="tracking-filter-btn" id="filterBtnResolved" onclick="setTrackingFilter('resolved')">
+                                        RESOLVED <span class="filter-count" id="countResolved">0</span>
+                                    </button>
+                                </div>
+                                <div class="tracking-sort-wrap" style="display:flex;align-items:center;gap:6px;">
+                                    <span class="mono" style="font-size:0.65rem;color:#666;text-transform:uppercase;">SORT:</span>
+                                    <select id="trackingSort" class="tracking-sort-select" onchange="setTrackingSort(this.value)">
+                                        <option value="newest" selected>Newest First</option>
+                                        <option value="oldest">Oldest First</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="trackingCategoryBreakdown" class="mono" style="font-size:0.65rem;color:#777;margin-top:8px;display:none;line-height:1.5;"></div>
+                        </div>
+
                         <div id="trackingPanel">
                             <div class="mono" style="color:#555;font-size:0.8rem;">You haven't submitted any reports yet.</div>
                         </div>
@@ -577,6 +663,12 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script>
+        // API HELPER
+        window.getApiBase = function() {
+            if (window.location.port === '8000') return '';
+            return 'http://127.0.0.1:8000';
+        };
+
         // MODAL
         const modal = document.getElementById('customModal');
         const modalBox = document.getElementById('modalBox');
@@ -785,7 +877,7 @@
 
                     let places = [];
                     try {
-                        const res = await fetch(`http://127.0.0.1:8000/api/places/search?q=${encodeURIComponent(query)}`);
+                        const res = await fetch(`${getApiBase()}/api/places/search?q=${encodeURIComponent(query)}`);
                         if (res.ok) places = await res.json();
                     } catch(e) {}
 
@@ -876,53 +968,332 @@
         });
 
         // CITIZEN TRACKING PANEL (User-Specific Backend Query)
+        let pendingFlagId = null;
+        let pendingFlagRefId = null;
+
+        window.openConfirmFlagModal = function(id, refId) {
+            const cleanId = (id && id !== 'undefined') ? id : null;
+            const cleanRef = (refId && refId !== 'undefined') ? refId : null;
+            pendingFlagId = cleanId || cleanRef;
+            pendingFlagRefId = cleanRef || cleanId || 'this incident';
+            const msgEl = document.getElementById('confirmFlagMsg');
+            if (msgEl) {
+                msgEl.innerText = `Are you sure you want to flag incident ${pendingFlagRefId} for administrator review and potential removal?`;
+            }
+            const modal = document.getElementById('confirmFlagModal');
+            if (modal) modal.classList.add('open');
+        };
+
+        window.closeConfirmFlagModal = function() {
+            pendingFlagId = null;
+            pendingFlagRefId = null;
+            const modal = document.getElementById('confirmFlagModal');
+            if (modal) modal.classList.remove('open');
+        };
+
+        window.submitFlagForReview = async function() {
+            const targetId = (pendingFlagId && pendingFlagId !== 'undefined') ? pendingFlagId : pendingFlagRefId;
+            if (!targetId) return;
+            const token = localStorage.getItem('up_token');
+            if (!token) {
+                closeConfirmFlagModal();
+                showDialog("AUTH REQUIRED", "Please log in to flag your incident for review.", "error");
+                return;
+            }
+            const btn = document.getElementById('confirmFlagBtn');
+            if (btn) {
+                btn.innerText = "SUBMITTING...";
+                btn.disabled = true;
+            }
+            try {
+                const res = await fetch(`${getApiBase()}/incidents/${encodeURIComponent(targetId)}/flag-review`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ token })
+                });
+                const data = await res.json();
+                closeConfirmFlagModal();
+                if (!res.ok) {
+                    showDialog("FLAG FAILED", data.detail || "Could not submit review request.", "error");
+                    return;
+                }
+                showDialog("FLAGGED FOR REVIEW", `Incident ${pendingFlagRefId} has been successfully submitted for administrator review.`, "success");
+                renderTrackingPanel();
+            } catch(err) {
+                closeConfirmFlagModal();
+                showDialog("NETWORK ERROR", "Unable to reach server. Please try again.", "error");
+            } finally {
+                if (btn) {
+                    btn.innerText = "Confirm";
+                    btn.disabled = false;
+                }
+            }
+        };
+
+        // ── TRACKING STATE & FILTERS ──────────────────────────────────────────
+        let cachedMyIncidents = [];
+        let currentTrackingFilter = 'all';
+        let currentTrackingSort = 'newest';
+
+        window.isIncidentResolved = function(i) {
+            if (!i) return false;
+            const st = String(i.status || '').trim().toUpperCase();
+            return st === 'RESOLVED' || Boolean(i.resolved_at);
+        };
+
+        window.isIncidentActive = function(i) {
+            return !window.isIncidentResolved(i);
+        };
+
+        window.setTrackingFilter = function(filterName) {
+            currentTrackingFilter = filterName || 'all';
+            ['all', 'active', 'resolved'].forEach(f => {
+                const btn = document.getElementById('filterBtn' + f.charAt(0).toUpperCase() + f.slice(1));
+                if (btn) {
+                    if (f === currentTrackingFilter) btn.classList.add('active');
+                    else btn.classList.remove('active');
+                }
+            });
+            window.applyTrackingFiltersAndSort();
+        };
+
+        window.setTrackingSort = function(sortOrder) {
+            currentTrackingSort = sortOrder || 'newest';
+            window.applyTrackingFiltersAndSort();
+        };
+
+        window.updateTrackingCounts = function(list) {
+            const arr = list || [];
+            const total = arr.length;
+            const active = arr.filter(window.isIncidentActive).length;
+            const resolved = arr.filter(window.isIncidentResolved).length;
+
+            const countAllEl = document.getElementById('countAll');
+            const countActiveEl = document.getElementById('countActive');
+            const countResolvedEl = document.getElementById('countResolved');
+            const totalBadgeEl = document.getElementById('trackingTotalBadge');
+            const breakdownEl = document.getElementById('trackingCategoryBreakdown');
+
+            if (countAllEl) countAllEl.innerText = total;
+            if (countActiveEl) countActiveEl.innerText = active;
+            if (countResolvedEl) countResolvedEl.innerText = resolved;
+            if (totalBadgeEl) totalBadgeEl.innerText = total > 0 ? `${total} TOTAL` : '';
+
+            // Category breakdown (counts by issue category)
+            if (breakdownEl) {
+                if (total > 0) {
+                    const catMap = {};
+                    arr.forEach(i => {
+                        const cat = i.category || 'General';
+                        catMap[cat] = (catMap[cat] || 0) + 1;
+                    });
+                    const parts = Object.entries(catMap).map(([c, n]) => `<span style="display:inline-block;margin-right:8px;">${c}: <b style="color:#bbb;">${n}</b></span>`);
+                    breakdownEl.innerHTML = `CATEGORIES: ${parts.join('· ')}`;
+                    breakdownEl.style.display = 'block';
+                } else {
+                    breakdownEl.style.display = 'none';
+                    breakdownEl.innerHTML = '';
+                }
+            }
+        };
+
+        window.applyTrackingFiltersAndSort = function() {
+            const panel = document.getElementById("trackingPanel");
+            if (!panel) return;
+
+            if (!cachedMyIncidents || cachedMyIncidents.length === 0) {
+                panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
+                return;
+            }
+
+            // 1. Filter
+            let filtered = cachedMyIncidents.slice();
+            if (currentTrackingFilter === 'active') {
+                filtered = filtered.filter(window.isIncidentActive);
+            } else if (currentTrackingFilter === 'resolved') {
+                filtered = filtered.filter(window.isIncidentResolved);
+            }
+
+            // 2. Sort based on submission date (created_at)
+            filtered.sort((a, b) => {
+                const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                return currentTrackingSort === 'oldest' ? (dateA - dateB) : (dateB - dateA);
+            });
+
+            // 3. Render
+            if (filtered.length === 0) {
+                const msg = currentTrackingFilter === 'active'
+                    ? 'No active reports.'
+                    : currentTrackingFilter === 'resolved'
+                    ? 'No resolved reports yet.'
+                    : 'You haven\'t submitted any reports yet.';
+                panel.innerHTML = `<div class="mono" style="color:#555;font-size:0.8rem;padding:0.5rem 0;">${msg}</div>`;
+                return;
+            }
+
+            panel.innerHTML = filtered.map(i => {
+                let reviewBadge = '';
+                let flagBtnHtml = '';
+                if (i.review_status === 'pending') {
+                    reviewBadge = `<div style="margin-top:4px;"><span class="mono" style="background:#2a2200;border:1px solid #ffcc00;color:#ffcc00;font-size:0.68rem;padding:2px 6px;border-radius:2px;display:inline-block;">⏳ Pending Admin Review</span></div>`;
+                } else if (i.review_status === 'approved') {
+                    reviewBadge = `<div style="margin-top:4px;"><span class="mono" style="background:#260d0d;border:1px solid #ff4d00;color:#ff4d00;font-size:0.68rem;padding:2px 6px;border-radius:2px;display:inline-block;">🚫 Removal Approved</span></div>`;
+                } else if (i.review_status === 'rejected') {
+                    reviewBadge = `<div style="margin-top:4px;"><span class="mono" style="background:#221515;border:1px solid #ff7777;color:#ff7777;font-size:0.68rem;padding:2px 6px;border-radius:2px;display:inline-block;">❌ Request Rejected</span></div>`;
+                    flagBtnHtml = `<button class="track-btn" style="border-color:#ff4d00;color:#ff4d00;margin-left:6px;" onclick="openConfirmFlagModal('${i.id || i.ref_id}', '${i.ref_id || i.id}')">FLAG AGAIN →</button>`;
+                } else {
+                    flagBtnHtml = `<button class="track-btn" style="border-color:#ff4d00;color:#ff4d00;margin-left:6px;" onclick="openConfirmFlagModal('${i.id || i.ref_id}', '${i.ref_id || i.id}')">FLAG FOR REVIEW →</button>`;
+                }
+
+                const resolved = window.isIncidentResolved(i);
+                const statusBadgeStyle = resolved
+                    ? 'background:#0c2818;border:1px solid #00ff9d;color:#00ff9d;'
+                    : 'background:#241d0e;border:1px solid #ffcc00;color:#ffcc00;';
+                const statusBadgeText = resolved ? '✓ RESOLVED' : `● ${i.status || 'OPEN'}`;
+                const commentCount = (i.comments && Array.isArray(i.comments)) ? i.comments.length : 0;
+                const discLabel = commentCount > 0 ? `💬 DISCUSSION (${commentCount})` : '💬 DISCUSSION';
+
+                return `
+                <div class="track-item" id="track-${i.ref_id}">
+                    <div class="mono" style="font-size:0.75rem;color:#888;line-height:1.7;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">
+                            <b style="color:var(--secondary-accent);letter-spacing:1px;">${i.ref_id}</b>
+                            <span class="mono" style="font-size:0.65rem;padding:1px 6px;border-radius:2px;${statusBadgeStyle}">
+                                ${statusBadgeText}
+                            </span>
+                        </div>
+                        ${i.category ? `<span style="color:#666;font-size:0.7rem;"> · ${i.category}</span>` : ''}
+                        ${i.input_method === "voice" ? `<span class="mono" style="font-size:0.65rem;color:#00ff9d;background:#0c2818;padding:1px 5px;border-radius:2px;margin-left:4px;">🎙 VOICE (${i.original_language || 'Voice'})</span>` : ''}<br>
+                        ${i.description ? i.description.substring(0, 55) + (i.description.length > 55 ? '...' : '') : ''}<br>
+                        <span style="color:#444;">${i.created_at ? new Date(i.created_at).toLocaleString() : ''}</span>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+                        <button class="track-btn" id="btn-check-${i.ref_id}" onclick="checkStatus('${i.ref_id}', event)">CHECK STATUS →</button>
+                        <button class="track-btn" id="btn-disc-${i.ref_id}" style="border-color:#38bdf8;color:#38bdf8;" onclick="toggleIncidentDiscussion('${i.ref_id}', '${i.id || i.ref_id}', event)">${discLabel} →</button>
+                        ${flagBtnHtml}
+                    </div>
+                    ${reviewBadge}
+                    <div id="status-${i.ref_id}" class="track-status"></div>
+                    <div id="discussion-${i.ref_id}" class="track-discussion-box" style="display:none;margin-top:8px;padding:10px;background:#0c1015;border:1px solid #1e293b;border-radius:4px;"></div>
+                </div>
+            `;
+            }).join('');
+        };
+
         window.renderTrackingPanel = async function() {
             const panel = document.getElementById("trackingPanel");
             if (!panel) return;
             const token = localStorage.getItem('up_token');
             if (!token) {
+                cachedMyIncidents = [];
+                window.updateTrackingCounts([]);
                 panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
                 return;
             }
 
             try {
-                const res = await fetch(`http://127.0.0.1:8000/incidents/my?token=${encodeURIComponent(token)}`);
+                const res = await fetch(`${getApiBase()}/incidents/my?token=${encodeURIComponent(token)}`);
                 if (!res.ok) {
+                    cachedMyIncidents = [];
+                    window.updateTrackingCounts([]);
                     panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
                     return;
                 }
-                const myIncidents = await res.json();
-                if (!myIncidents || myIncidents.length === 0) {
-                    panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
-                    return;
-                }
-                panel.innerHTML = myIncidents.map(i => `
-                    <div class="track-item" id="track-${i.ref_id}">
-                        <div class="mono" style="font-size:0.75rem;color:#888;line-height:1.7;">
-                            <b style="color:var(--secondary-accent);letter-spacing:1px;">${i.ref_id}</b>
-                            ${i.category ? `<span style="color:#666;font-size:0.7rem;"> · ${i.category}</span>` : ''}<br>
-                            ${i.description ? i.description.substring(0, 55) + (i.description.length > 55 ? '...' : '') : ''}<br>
-                            <span style="color:#444;">${i.created_at ? new Date(i.created_at).toLocaleString() : ''}</span>
-                        </div>
-                        <button class="track-btn" onclick="checkStatus('${i.ref_id}')">CHECK STATUS →</button>
-                        <div id="status-${i.ref_id}" class="track-status"></div>
-                    </div>
-                `).join('');
+                const data = await res.json();
+                cachedMyIncidents = Array.isArray(data) ? data : [];
+                window.updateTrackingCounts(cachedMyIncidents);
+                window.applyTrackingFiltersAndSort();
             } catch(e) {
+                cachedMyIncidents = [];
+                window.updateTrackingCounts([]);
                 panel.innerHTML = '<div class="mono" style="color:#555;font-size:0.8rem;">You haven\'t submitted any reports yet.</div>';
             }
         };
         function renderTrackingPanel() { window.renderTrackingPanel(); }
 
-        window.checkStatus = async function(refId) {
+        // ── CHECK STATUS DROPDOWN CONTROLLER ─────────────────────────────────
+        let activeStatusDropdownRefId = null;
+
+        window.closeStatusDropdown = function(refId) {
+            if (!refId) return;
             const el = document.getElementById(`status-${refId}`);
+            if (el) {
+                el.innerHTML = '';
+                el.classList.remove('open');
+                el.style.display = 'none';
+            }
+            const btn = document.getElementById(`btn-check-${refId}`);
+            if (btn) {
+                btn.classList.remove('active');
+                btn.innerHTML = 'CHECK STATUS →';
+            }
+            if (activeStatusDropdownRefId === refId) {
+                activeStatusDropdownRefId = null;
+            }
+        };
+
+        window.closeAllStatusDropdowns = function() {
+            if (activeStatusDropdownRefId) {
+                window.closeStatusDropdown(activeStatusDropdownRefId);
+            }
+            document.querySelectorAll('.track-status').forEach(el => {
+                el.innerHTML = '';
+                el.classList.remove('open');
+                el.style.display = 'none';
+            });
+            document.querySelectorAll('[id^="btn-check-"]').forEach(btn => {
+                btn.classList.remove('active');
+                btn.innerHTML = 'CHECK STATUS →';
+            });
+            activeStatusDropdownRefId = null;
+        };
+
+        window.checkStatus = async function(refId, event, forceOpen = false) {
+            if (event && typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+
+            const el = document.getElementById(`status-${refId}`);
+            const btn = document.getElementById(`btn-check-${refId}`);
+            if (!el) return;
+
+            // 1. Toggle check: if this dropdown is already open, close it (unless forced open e.g. background refresh)
+            const isOpen = (activeStatusDropdownRefId === refId) ||
+                           el.classList.contains('open') ||
+                           (el.style.display === 'block' && el.innerHTML.trim() !== '');
+            if (isOpen && !forceOpen) {
+                window.closeStatusDropdown(refId);
+                return;
+            }
+
+            // 5. Close any other open dropdown first (accordion behavior)
+            if (activeStatusDropdownRefId && activeStatusDropdownRefId !== refId) {
+                window.closeStatusDropdown(activeStatusDropdownRefId);
+            }
+
+            // Mark active and open
+            activeStatusDropdownRefId = refId;
+            el.style.display = 'block';
+            el.classList.add('open');
+            if (btn) {
+                btn.classList.add('active');
+                btn.innerHTML = 'CLOSE STATUS ✕';
+            }
+
             el.innerHTML = '<span class="mono" style="font-size:0.7rem;color:#555;">FETCHING...</span>';
+
             try {
-                const res = await fetch(`http://127.0.0.1:8000/track/${refId}`);
+                const res = await fetch(`${getApiBase()}/track/${encodeURIComponent(refId)}`);
                 if (!res.ok) throw new Error("Not found");
                 const data = await res.json();
+
+                // If user closed while in flight, discard render
+                if (activeStatusDropdownRefId !== refId) return;
+
                 const statusColor = data.status === "RESOLVED" ? "#00ff9d" : "#ff4d00";
                 const sevColor = data.severity === "HIGH" ? "#ff4d00" : data.severity === "MEDIUM" ? "#ffcc00" : "#00bfff";
+
                 const comments = (data.comments || []).map(c => `
                     <div class="comment-bubble ${c.role === 'citizen' ? 'citizen' : 'authority'}">
                         <div class="comment-author">${c.author} · ${new Date(c.time).toLocaleTimeString()}</div>
@@ -930,13 +1301,43 @@
                     </div>
                 `).join('') || '<div class="mono" style="color:#444;font-size:0.7rem;">No updates yet.</div>';
 
+                let revStatusHtml = '';
+                if (data.review_status === 'pending') {
+                    revStatusHtml = `<br>Review Status: <b style="color:#ffcc00;">Pending Admin Review</b>`;
+                } else if (data.review_status === 'approved') {
+                    revStatusHtml = `<br>Review Status: <b style="color:#ff4d00;">Removal Approved</b>`;
+                } else if (data.review_status === 'rejected') {
+                    revStatusHtml = `<br>Review Status: <b style="color:#ff7777;">Request Rejected</b>`;
+                } else if (data.review_status === 'restored') {
+                    revStatusHtml = `<br>Review Status: <b style="color:#00ff9d;">Restored</b>`;
+                }
+
+                // History Timeline
+                const historyHtml = (data.history || []).map(h => {
+                    const hColor = h.status === "RESOLVED" ? "#00ff9d" : "#ffcc00";
+                    return `
+                    <div style="display:flex;align-items:center;gap:6px;font-size:0.65rem;color:#777;margin-bottom:2px;">
+                        <span style="color:${hColor};font-size:0.6rem;">●</span>
+                        <b style="color:${hColor}">${h.status}</b>
+                        <span>· ${h.by || 'system'}</span>
+                        <span style="color:#444;">${h.time ? new Date(h.time).toLocaleString() : ''}</span>
+                    </div>`;
+                }).join('');
+
                 const token = localStorage.getItem('up_token') || '';
                 el.innerHTML = `
-                    <div style="margin-top:6px;padding:8px 10px;background:#181818;border:1px solid #2a2a2a;border-radius:4px;">
+                    <div class="status-dropdown-card" style="margin-top:8px;padding:10px 12px;background:#141414;border:1px solid #2a2a2a;border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.5);" onclick="event.stopPropagation()">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;border-bottom:1px solid #222;padding-bottom:4px;">
+                            <div class="mono" style="font-size:0.68rem;color:#888;letter-spacing:1px;font-weight:bold;">
+                                STATUS DETAILS · <span style="color:var(--secondary-accent);">${refId}</span>
+                            </div>
+                            <button type="button" class="status-close-btn mono" onclick="closeStatusDropdown('${refId}')" style="background:none;border:none;color:#666;font-size:0.75rem;cursor:pointer;padding:0 4px;" title="Close dropdown">✕</button>
+                        </div>
                         <div class="mono" style="font-size:0.72rem;line-height:1.9;color:#aaa;">
                             Status: <b style="color:${statusColor};">${data.status}</b><br>
                             Severity: <b style="color:${sevColor};">${data.severity}</b><br>
-                            Dept: <b style="color:#e0e0e0;">${data.department}</b><br>
+                            Dept: <b style="color:#e0e0e0;">${data.department}</b>
+                            ${revStatusHtml}<br>
                             ${data.input_method === "voice" ? `<span class="mono" style="font-size:0.68rem; color:#00ff9d; background:#0c2818; padding:2px 6px; border-radius:2px;">🎙 VOICE (${data.original_language || 'Voice'})</span><br>` : ''}
                             ${data.resolved_at ? `<span style="color:#00ff9d;">✓ Resolved</span>` : `<span style="color:#555;">Pending resolution</span>`}
                         </div>
@@ -944,44 +1345,262 @@
                         <div style="margin-top:6px;padding:6px 8px;background:#141b17;border-left:2px solid #00ff9d;font-size:0.7rem;color:#88b598;">
                             <b>Original Hindi Transcript:</b> "${data.original_transcript}"
                         </div>` : ''}
-                        <div class="comment-section">
-                            <div class="mono" style="font-size:0.65rem;color:#555;margin-bottom:6px;">UPDATES</div>
+                        ${historyHtml ? `
+                        <div style="margin-top:8px;border-top:1px solid #1f1f1f;padding-top:6px;">
+                            <div class="mono" style="font-size:0.62rem;color:#555;margin-bottom:4px;letter-spacing:1px;text-transform:uppercase;">Timeline History</div>
+                            ${historyHtml}
+                        </div>` : ''}
+                        <div class="comment-section" style="margin-top:8px;border-top:1px solid #1f1f1f;padding-top:6px;">
+                            <div class="mono" style="font-size:0.65rem;color:#555;margin-bottom:6px;">UPDATES & REPLIES</div>
                             <div id="comments-${refId}">${comments}</div>
                             ${token ? `
-                            <div class="comment-input-row">
-                                <input class="comment-input" id="cinput-${refId}" placeholder="Add a comment...">
-                                <button class="comment-send" onclick="sendComment('${refId}', '${data.id || ''}')">SEND</button>
+                            <div class="comment-input-row" style="display:flex;gap:0.5rem;margin-top:0.6rem;">
+                                <input class="comment-input" id="cinput-${refId}" placeholder="Add a comment..." style="flex:1;background:transparent;border:1px solid #2a2a2a;color:white;padding:0.4rem;font-family:var(--font-mono);font-size:0.72rem;">
+                                <button class="comment-send" onclick="sendComment('${refId}', '${data.id || ''}', true)" style="background:var(--secondary-accent);color:black;border:none;padding:0.4rem 0.8rem;font-family:var(--font-mono);font-size:0.7rem;font-weight:bold;cursor:pointer;">SEND</button>
                             </div>` : ''}
                         </div>
                     </div>
                 `;
-                // store incident id mapping
                 window._refToId = window._refToId || {};
                 window._refToId[refId] = data.id;
             } catch (err) {
-                el.innerHTML = '<span class="mono" style="font-size:0.7rem;color:#ff4d00;">Could not fetch — is server running?</span>';
+                if (activeStatusDropdownRefId === refId) {
+                    el.innerHTML = '<span class="mono" style="font-size:0.7rem;color:#ff4d00;">Could not fetch — is server running?</span>';
+                }
             }
         };
+        window.toggleCheckStatus = window.checkStatus;
 
-        window.sendComment = async function(refId, incidentId) {
+        window.sendComment = async function(refId, incidentId, closeAfterAction = false) {
             const input = document.getElementById(`cinput-${refId}`);
+            if (!input) return;
             const msg = input.value.trim();
             if (!msg) return;
             const token = localStorage.getItem('up_token') || 'guest';
             try {
-                await fetch('http://127.0.0.1:8000/comment', {
+                await fetch(`${getApiBase()}/comment`, {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ incident_id: incidentId, token, message: msg })
                 });
                 input.value = '';
-                checkStatus(refId);
+                if (closeAfterAction) {
+                    window.closeStatusDropdown(refId);
+                } else {
+                    const el = document.getElementById(`status-${refId}`);
+                    if (el && el.style.display !== 'none') {
+                        activeStatusDropdownRefId = null;
+                        window.checkStatus(refId);
+                    }
+                }
             } catch(e) {}
+        };
+
+        // Click outside listener: closes active Check Status dropdown
+        document.addEventListener('click', function(e) {
+            if (!activeStatusDropdownRefId) return;
+            const currentDropdown = document.getElementById(`status-${activeStatusDropdownRefId}`);
+            const currentBtn = document.getElementById(`btn-check-${activeStatusDropdownRefId}`);
+
+            if (currentDropdown && currentDropdown.contains(e.target)) return;
+            if (currentBtn && currentBtn.contains(e.target)) return;
+
+            window.closeStatusDropdown(activeStatusDropdownRefId);
+        });
+
+        // Keydown listener: closes active Check Status dropdown on Escape
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) {
+                if (activeStatusDropdownRefId) {
+                    window.closeStatusDropdown(activeStatusDropdownRefId);
+                }
+            }
+        });
+
+        // ── ESCAPE HTML HELPER ────────────────────────────────────────────────
+        window.escapeHtml = function(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        // ── INCIDENT DISCUSSION CONTROLLER ────────────────────────────────────
+        let openDiscussionRefId = null;
+
+        window.toggleIncidentDiscussion = async function(refId, incidentId, event) {
+            if (event && typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+
+            const box = document.getElementById(`discussion-${refId}`);
+            const btn = document.getElementById(`btn-disc-${refId}`);
+            if (!box) return;
+
+            const isCurrentlyOpen = (box.style.display !== 'none' && box.innerHTML.trim() !== '');
+            if (isCurrentlyOpen) {
+                box.style.display = 'none';
+                box.innerHTML = '';
+                if (btn) btn.classList.remove('active');
+                if (openDiscussionRefId === refId) openDiscussionRefId = null;
+                return;
+            }
+
+            // Close previous open discussion if any
+            if (openDiscussionRefId && openDiscussionRefId !== refId) {
+                const prevBox = document.getElementById(`discussion-${openDiscussionRefId}`);
+                const prevBtn = document.getElementById(`btn-disc-${openDiscussionRefId}`);
+                if (prevBox) { prevBox.style.display = 'none'; prevBox.innerHTML = ''; }
+                if (prevBtn) prevBtn.classList.remove('active');
+            }
+
+            openDiscussionRefId = refId;
+            box.style.display = 'block';
+            if (btn) btn.classList.add('active');
+
+            box.innerHTML = '<div class="mono" style="font-size:0.75rem;color:#888;">Loading discussion history...</div>';
+
+            const token = localStorage.getItem('up_token');
+            if (!token) {
+                box.innerHTML = '<div class="mono" style="font-size:0.75rem;color:#ef4444;">Please log in to view and send comments.</div>';
+                return;
+            }
+
+            await window.loadAndRenderDiscussion(refId, incidentId);
+        };
+
+        window.loadAndRenderDiscussion = async function(refId, incidentId) {
+            const box = document.getElementById(`discussion-${refId}`);
+            if (!box) return;
+
+            const token = localStorage.getItem('up_token');
+            try {
+                const res = await fetch(`${getApiBase()}/incidents/${encodeURIComponent(incidentId)}/comments?token=${encodeURIComponent(token)}`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || `HTTP ${res.status}`);
+                }
+                const comments = await res.json();
+
+                // Update comments array on cached incident
+                const cachedInc = cachedMyIncidents.find(i => i.ref_id === refId || i.id === incidentId);
+                if (cachedInc) {
+                    cachedInc.comments = comments;
+                    const btn = document.getElementById(`btn-disc-${refId}`);
+                    if (btn) {
+                        const count = comments.length;
+                        btn.innerHTML = (count > 0 ? `💬 DISCUSSION (${count})` : '💬 DISCUSSION') + ' ✕';
+                    }
+                }
+
+                let commentsListHtml = '';
+                if (!comments || comments.length === 0) {
+                    commentsListHtml = '<div class="mono" style="font-size:0.75rem;color:#64748b;margin-bottom:8px;">No comments yet. Post the first message below.</div>';
+                } else {
+                    commentsListHtml = comments.map(c => {
+                        const isAdmin = (c.sender_role === 'admin' || c.role !== 'citizen');
+                        const bg = isAdmin ? '#0f172a' : '#18181b';
+                        const border = isAdmin ? '#38bdf8' : '#10b981';
+                        const badgeText = isAdmin ? 'ADMINISTRATOR' : 'YOU (CITIZEN)';
+                        const badgeColor = isAdmin ? '#38bdf8' : '#10b981';
+                        const author = window.escapeHtml(c.author || (isAdmin ? 'Administrator' : 'Citizen'));
+                        const timeStr = c.created_at || c.time ? new Date(c.created_at || c.time).toLocaleString() : '';
+                        const msg = window.escapeHtml(c.message || '');
+
+                        return `
+                            <div style="margin-bottom:8px;padding:8px 10px;background:${bg};border-left:3px solid ${border};border-radius:2px;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:4px;">
+                                    <div style="display:flex;align-items:center;gap:6px;">
+                                        <span class="mono" style="font-size:0.65rem;color:${badgeColor};font-weight:700;">${badgeText}</span>
+                                        <span class="mono" style="font-size:0.75rem;color:#e2e8f0;font-weight:600;">${author}</span>
+                                    </div>
+                                    <span class="mono" style="font-size:0.68rem;color:#64748b;">${timeStr}</span>
+                                </div>
+                                <div style="font-size:0.78rem;color:#cbd5e1;white-space:pre-wrap;line-height:1.4;">${msg}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                box.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #1e293b;">
+                        <span class="mono" style="font-size:0.78rem;color:#38bdf8;font-weight:700;">💬 Incident Discussion & Updates (${refId})</span>
+                        <button class="track-btn" style="padding:1px 6px;font-size:0.65rem;border-color:#475569;color:#94a3b8;" onclick="toggleIncidentDiscussion('${refId}', '${incidentId}', event)">✕ CLOSE</button>
+                    </div>
+                    <div id="disc-list-${refId}" style="max-height:220px;overflow-y:auto;margin-bottom:10px;padding-right:4px;">
+                        ${commentsListHtml}
+                    </div>
+                    <div style="background:#05070a;padding:8px;border-radius:3px;border:1px solid #1e293b;">
+                        <textarea id="disc-input-${refId}" placeholder="Type your comment, query, or follow-up information here..." style="width:100%;min-height:55px;background:#0f172a;border:1px solid #334155;color:#f1f5f9;padding:6px;font-size:0.75rem;border-radius:3px;box-sizing:border-box;resize:vertical;"></textarea>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;flex-wrap:wrap;gap:6px;">
+                            <span id="disc-err-${refId}" class="mono" style="font-size:0.7rem;color:#ef4444;"></span>
+                            <button class="track-btn" id="disc-btn-${refId}" style="border-color:#38bdf8;color:#38bdf8;background:#0369a122;" onclick="submitCitizenDiscussionComment('${refId}', '${incidentId}')">SEND COMMENT →</button>
+                        </div>
+                    </div>
+                `;
+            } catch(e) {
+                box.innerHTML = `<div class="mono" style="font-size:0.75rem;color:#ef4444;">Error loading discussion: ${e.message}</div>`;
+            }
+        };
+
+        window.submitCitizenDiscussionComment = async function(refId, incidentId) {
+            const input = document.getElementById(`disc-input-${refId}`);
+            const errEl = document.getElementById(`disc-err-${refId}`);
+            const btn = document.getElementById(`disc-btn-${refId}`);
+            if (!input || !btn) return;
+
+            const msg = input.value.trim();
+            if (!msg) {
+                if (errEl) errEl.innerText = 'Comment cannot be empty';
+                return;
+            }
+            if (msg.length > 2000) {
+                if (errEl) errEl.innerText = 'Comment cannot exceed 2000 characters';
+                return;
+            }
+
+            const token = localStorage.getItem('up_token');
+            if (!token) {
+                if (errEl) errEl.innerText = 'Please log in to submit comments';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = 'SENDING...';
+            if (errEl) errEl.innerText = '';
+
+            try {
+                const res = await fetch(`${getApiBase()}/incidents/${encodeURIComponent(incidentId)}/comments`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ token, message: msg })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Failed to submit comment');
+                }
+                input.value = '';
+                await window.loadAndRenderDiscussion(refId, incidentId);
+            } catch(err) {
+                if (errEl) errEl.innerText = err.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'SEND COMMENT →';
+            }
+        };
+
+        window.onDiscussionNewComment = function(d) {
+            if (openDiscussionRefId && (d.ref_id === openDiscussionRefId || d.incident_id === openDiscussionRefId)) {
+                window.loadAndRenderDiscussion(openDiscussionRefId, d.incident_id || d.ref_id);
+            }
         };
     </script>
 
     <script>
-    const API = 'http://127.0.0.1:8000';
+    const API = getApiBase();
 
     // ── AUTH STATE ──────────────────────────────────────────────────
     let currentUser = null;
@@ -1226,22 +1845,45 @@
         citizenSSE = new EventSource(API + '/stream');
         citizenSSE.addEventListener('status_update', function(e) {
             const d = JSON.parse(e.data);
-            // Check if this ref_id belongs to the current user
-            const myInc = JSON.parse(localStorage.getItem('myIncidents') || '[]');
-            const mine  = myInc.find(i => i.ref_id === d.ref_id);
+            const mine = cachedMyIncidents.find(i => i.ref_id === d.ref_id || i.id === d.id);
             if (mine) {
                 showCitizenToast('Your complaint ' + d.ref_id + ' is now: ' + d.status);
-                // Auto-refresh the tracking status display
+                mine.status = d.status;
+                if (d.status === 'RESOLVED') {
+                    mine.resolved_at = d.time || new Date().toISOString();
+                }
+                window.updateTrackingCounts(cachedMyIncidents);
+                window.applyTrackingFiltersAndSort();
                 const statusEl = document.getElementById('status-' + d.ref_id);
-                if (statusEl) statusEl.innerText = d.status;
+                if (statusEl && (statusEl.classList.contains('open') || statusEl.style.display === 'block')) {
+                    window.checkStatus(d.ref_id, null, true);
+                }
             }
         });
         citizenSSE.addEventListener('new_comment', function(e) {
             const d = JSON.parse(e.data);
-            const myInc = JSON.parse(localStorage.getItem('myIncidents') || '[]');
-            if (myInc.find(i => i.ref_id === d.ref_id)) {
+            const mine = cachedMyIncidents.find(i => i.ref_id === d.ref_id || i.id === d.id);
+            if (mine) {
                 showCitizenToast('New reply on ' + d.ref_id + ': "' + d.message.substring(0,40) + '"');
+                const statusEl = document.getElementById('status-' + d.ref_id);
+                if (statusEl && (statusEl.classList.contains('open') || statusEl.style.display === 'block')) {
+                    window.checkStatus(d.ref_id, null, true);
+                }
+                if (window.onDiscussionNewComment) {
+                    window.onDiscussionNewComment(d);
+                }
+                // Refresh tracking panel to update comment count badge
+                window.renderTrackingPanel();
             }
+        });
+        citizenSSE.addEventListener('review_updated', function(e) {
+            renderTrackingPanel();
+            const d = JSON.parse(e.data);
+            const statusLabel = d.review_status === 'approved' ? 'Removal Approved' : d.review_status === 'rejected' ? 'Request Rejected' : 'Restored';
+            showCitizenToast('Review updated for ' + (d.ref_id || 'incident') + ': ' + statusLabel);
+        });
+        citizenSSE.addEventListener('review_requested', function(e) {
+            renderTrackingPanel();
         });
         citizenSSE.onerror = function() { setTimeout(function(){ connectCitizenSSE(token); }, 5000); };
     }
