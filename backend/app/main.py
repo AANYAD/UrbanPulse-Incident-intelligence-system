@@ -104,7 +104,16 @@ def load_users():
     if os.path.exists(USERS_FILE):
         try:
             with open(USERS_FILE, "r") as f:
-                return json.load(f)
+                data = json.load(f)
+                updated = False
+                for uname, udata in data.items():
+                    if "user_id" not in udata:
+                        udata["user_id"] = str(uuid.uuid5(uuid.NAMESPACE_OID, uname))
+                        updated = True
+                if updated:
+                    with open(USERS_FILE, "w") as f_out:
+                        json.dump(data, f_out, indent=2)
+                return data
         except:
             pass
     return {}
@@ -160,6 +169,17 @@ class SignupRequest(BaseModel):
     display:  Optional[str] = None
     email:    Optional[str] = None
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class TranslateRequest(BaseModel):
+    text: str
+    source_lang: str
+
 class IncidentRequest(BaseModel):
     description: str
     category:    str
@@ -167,6 +187,9 @@ class IncidentRequest(BaseModel):
     longitude:   float
     image:       Optional[str] = None
     token:       Optional[str] = None   # citizen token to link email
+    original_transcript: Optional[str] = None
+    original_language:   Optional[str] = None
+    input_method:        Optional[str] = "manual"
 
 class UpdateStatusRequest(BaseModel):
     id:            str
@@ -255,19 +278,34 @@ def signup(req: SignupRequest):
     if username in AUTHORITY_USERS:
         raise HTTPException(status_code=409, detail="Username already taken")
 
+    # Email uniqueness check (case-insensitive)
+    email = (req.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+
+    for udata in citizen_users.values():
+        existing_email = (udata.get("email") or "").strip().lower()
+        if existing_email and existing_email == email:
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email address already exists. Please log in instead."
+            )
+
     display = req.display or req.username
+    user_id = str(uuid.uuid4())
     citizen_users[username] = {
+        "user_id":       user_id,
         "password_hash": hash_password(req.password),
         "display":       display,
         "role":          "citizen",
-        "email":         req.email or "",
+        "email":         email,
         "created_at":    datetime.now().isoformat(),
     }
     save_users()  # persist to disk
 
     # Welcome email
-    if req.email:
-        send_email_async(req.email, "Welcome to UrbanPulse", make_email_html(
+    if email:
+        send_email_async(email, "Welcome to UrbanPulse", make_email_html(
             "Account Created",
             ["Username: " + username,
              "You can now submit and track civic complaints.",
@@ -276,12 +314,13 @@ def signup(req: SignupRequest):
 
     token = str(uuid.uuid4())
     sessions[token] = {
+        "user_id":  user_id,
         "username": username,
         "role":     "citizen",
         "display":  display,
         "token":    token,
     }
-    return {"token": token, "role": "citizen", "display": display}
+    return {"token": token, "role": "citizen", "display": display, "user_id": user_id}
 
 # ── AUTH: LOGIN (authority + citizen) ────────────────────────────────
 @app.post("/auth/login")
@@ -300,17 +339,30 @@ def login(req: LoginRequest):
         }
         return {"token": token, "role": auth_user["role"], "display": auth_user["display"]}
 
-    # Check citizen accounts
+    # Check citizen accounts (supports either username or registered email)
     cit_user = citizen_users.get(username)
+    if not cit_user:
+        for uname, udata in citizen_users.items():
+            if uname.lower() == username or (udata.get("email") or "").strip().lower() == username:
+                cit_user = udata
+                username = uname
+                break
+
     if cit_user and cit_user["password_hash"] == hash_password(req.password):
+        user_id = cit_user.get("user_id")
+        if not user_id:
+            user_id = str(uuid.uuid5(uuid.NAMESPACE_OID, username))
+            cit_user["user_id"] = user_id
+            save_users()
         token = str(uuid.uuid4())
         sessions[token] = {
+            "user_id":  user_id,
             "username": username,
             "role":     "citizen",
             "display":  cit_user["display"],
             "token":    token,
         }
-        return {"token": token, "role": "citizen", "display": cit_user["display"]}
+        return {"token": token, "role": "citizen", "display": cit_user["display"], "user_id": user_id}
 
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
@@ -325,6 +377,140 @@ def me(token: str):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
+
+# ── AUTH: FORGOT & RESET PASSWORD ─────────────────────────────────────
+password_resets = {}  # { token_hash: { "username": str, "email": str, "expires": datetime } }
+
+@app.post("/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    email = (req.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+
+    # Generic response returned regardless of account existence to prevent account enumeration
+    generic_msg = "If this email is registered, a password reset link has been sent to it."
+
+    user_entry = None
+    for uname, udata in citizen_users.items():
+        if (udata.get("email") or "").strip().lower() == email:
+            user_entry = (uname, udata)
+            break
+
+    if not user_entry:
+        return {"ok": True, "message": generic_msg}
+
+    import secrets
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires = datetime.now() + timedelta(minutes=15)
+    password_resets[token_hash] = {
+        "username": user_entry[0],
+        "email": email,
+        "expires": expires
+    }
+
+    reset_link = f"http://127.0.0.1:5500/frontend/index.html?reset_token={raw_token}"
+
+    send_email_async(
+        email,
+        "UrbanPulse — Password Reset Link",
+        make_email_html("Password Reset Request", [
+            "We received a request to reset your UrbanPulse password for account: <b>" + user_entry[0] + "</b>",
+            "Click the button below to set a new password:",
+            "<div style='text-align:center;margin:18px 0;'><a href='" + reset_link + "' style='background:#ff4d00;color:#fff;padding:10px 22px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block;'>RESET PASSWORD</a></div>",
+            "Or open this link directly:<br><span style='font-size:11px;color:#888;word-break:break-all;'>" + reset_link + "</span>",
+            "This link will expire in 15 minutes and can only be used once.",
+            "If you did not request this, you can safely ignore this email."
+        ])
+    )
+
+    return {"ok": True, "message": generic_msg}
+
+@app.post("/auth/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    if not req.token:
+        raise HTTPException(status_code=400, detail="Reset token is required")
+    if not req.new_password or len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+
+    token_hash = hashlib.sha256(req.token.strip().encode("utf-8")).hexdigest()
+    record = password_resets.get(token_hash)
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid or already used password reset link")
+
+    if datetime.now() > record["expires"]:
+        password_resets.pop(token_hash, None)
+        raise HTTPException(status_code=400, detail="Password reset link has expired. Please request a new one.")
+
+    username = record["username"]
+    if username not in citizen_users:
+        found_uname = None
+        for u in citizen_users.keys():
+            if u.lower() == username.lower():
+                found_uname = u
+                break
+        if found_uname:
+            username = found_uname
+        else:
+            password_resets.pop(token_hash, None)
+            raise HTTPException(status_code=404, detail="Account not found")
+
+    citizen_users[username]["password_hash"] = hash_password(req.new_password)
+    save_users()
+
+    # Single-use: remove immediately
+    password_resets.pop(token_hash, None)
+
+    # Invalidate active sessions for this user
+    invalid_tokens = [tok for tok, s in sessions.items() if s.get("username") == username]
+    for tok in invalid_tokens:
+        sessions.pop(tok, None)
+
+    return {
+        "ok": True,
+        "message": f"Password reset successfully for account '{username}'. Please log in with your new password.",
+        "username": username
+    }
+
+# ── PLACE SEARCH (GEOCODING) ──────────────────────────────────────────
+place_search_cache = {}
+
+@app.get("/api/places/search")
+def search_places(q: str = ""):
+    query = (q or "").strip()
+    if len(query) < 2:
+        return []
+    q_lower = query.lower()
+    if q_lower in place_search_cache:
+        return place_search_cache[q_lower]
+    try:
+        import urllib.request
+        import urllib.parse
+        encoded_q = urllib.parse.quote(query)
+        url = f"https://nominatim.openstreetmap.org/search?format=json&q={encoded_q}&limit=6&addressdetails=1"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "UrbanPulse-CivicPlatform/2.0 (civic-incident-response)",
+                "Accept-Language": "en"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data:
+                results.append({
+                    "name": item.get("name") or (item.get("display_name", "").split(",")[0]),
+                    "display_name": item.get("display_name", ""),
+                    "lat": float(item["lat"]),
+                    "lon": float(item["lon"]),
+                    "type": item.get("type", "")
+                })
+            place_search_cache[q_lower] = results
+            return results
+    except Exception as e:
+        print(f"Geocoding error: {e}")
+        return []
 
 # ── SSE: REAL-TIME STREAM ─────────────────────────────────────────────
 @app.get("/stream")
@@ -363,6 +549,27 @@ async def stream():
         }
     )
 
+# ── MULTILINGUAL TRANSLATION ──────────────────────────────────────────
+@app.post("/api/translate")
+async def translate_text(req: TranslateRequest):
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text to translate cannot be empty.")
+    if len(text) > 1000:
+        raise HTTPException(status_code=400, detail="Text exceeds maximum limit of 1000 characters.")
+
+    from app.translation_service import IndicTranslationService
+    try:
+        service = IndicTranslationService.get_instance()
+        # Execute translation in thread to avoid blocking FastAPI event loop
+        result = await asyncio.to_thread(service.translate, text, req.source_lang)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        print(f"[TRANSLATION ERROR] {e}")
+        raise HTTPException(status_code=503, detail=f"Translation service temporarily unavailable: {str(e)}")
+
 # ── CITIZEN: SUBMIT ───────────────────────────────────────────────────
 @app.post("/classify")
 async def classify(req: IncidentRequest):
@@ -376,29 +583,38 @@ async def classify(req: IncidentRequest):
     ref_id  = "INC-" + str(uuid.uuid4())[:8].upper()
     inc_id  = str(uuid.uuid4())
 
-    # Look up submitter email if token provided
+    # Look up submitter email and user_id if token provided
     submitter_email = ""
+    user_id = None
     if req.token:
-        submitter_email = get_citizen_email(req.token)
+        sess = get_session_user(req.token)
+        if sess:
+            user_id = sess.get("user_id")
+            uname = sess.get("username", "")
+            submitter_email = citizen_users.get(uname, {}).get("email", "")
 
     incidents[inc_id] = {
-        "id":              inc_id,
-        "ref_id":          ref_id,
-        "description":     req.description,
-        "category":        req.category,
-        "latitude":        req.latitude,
-        "longitude":       req.longitude,
-        "severity":        severity,
-        "status":          "OPEN",
-        "department":      department,
-        "sla_due":         sla_due.isoformat(),
-        "sla_hours":       sla_h,
-        "created_at":      now.isoformat(),
-        "resolved_at":     None,
-        "image":           req.image,
-        "comments":        [],
-        "history":         [{"status": "OPEN", "time": now.isoformat(), "by": "system"}],
-        "submitter_email": submitter_email,
+        "id":                  inc_id,
+        "ref_id":              ref_id,
+        "user_id":             user_id,
+        "description":         req.description,
+        "category":            req.category,
+        "latitude":            req.latitude,
+        "longitude":           req.longitude,
+        "severity":            severity,
+        "status":              "OPEN",
+        "department":          department,
+        "sla_due":             sla_due.isoformat(),
+        "sla_hours":           sla_h,
+        "created_at":          now.isoformat(),
+        "resolved_at":         None,
+        "image":               req.image,
+        "comments":            [],
+        "history":             [{"status": "OPEN", "time": now.isoformat(), "by": "system"}],
+        "submitter_email":     submitter_email,
+        "original_transcript": req.original_transcript,
+        "original_language":   req.original_language,
+        "input_method":        req.input_method or "manual",
     }
 
     # Confirm submission to citizen
@@ -434,17 +650,37 @@ def track(ref_id: str):
     for inc in incidents.values():
         if inc["ref_id"] == ref_id:
             return {
-                "id":          inc["id"],
-                "ref_id":      inc["ref_id"],
-                "status":      inc["status"],
-                "severity":    inc["severity"],
-                "department":  inc["department"],
-                "created_at":  inc["created_at"],
-                "resolved_at": inc["resolved_at"],
-                "history":     inc.get("history", []),
-                "comments":    [c for c in inc.get("comments", []) if not c.get("internal")],
+                "id":                  inc["id"],
+                "ref_id":              inc["ref_id"],
+                "status":              inc["status"],
+                "severity":            inc["severity"],
+                "department":          inc["department"],
+                "description":         inc.get("description", ""),
+                "created_at":          inc["created_at"],
+                "resolved_at":         inc["resolved_at"],
+                "history":             inc.get("history", []),
+                "comments":            [c for c in inc.get("comments", []) if not c.get("internal")],
+                "original_transcript": inc.get("original_transcript"),
+                "original_language":   inc.get("original_language"),
+                "input_method":        inc.get("input_method", "manual"),
             }
     raise HTTPException(status_code=404, detail="Incident not found")
+
+# ── CITIZEN: MY SUBMITTED REPORTS ─────────────────────────────────────
+@app.get("/incidents/my")
+def get_my_incidents(token: str):
+    user = require_auth(token)
+    user_id = user.get("user_id")
+    if not user_id:
+        return []
+
+    # Strictly filter by authenticated citizen user_id at the backend/database level
+    my_reports = [
+        i for i in incidents.values()
+        if i.get("user_id") and i.get("user_id") == user_id
+    ]
+    my_reports.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return my_reports
 
 # ── PUBLIC: HEATMAP + STATS ───────────────────────────────────────────
 @app.get("/public/heatmap")

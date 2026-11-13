@@ -1,6 +1,6 @@
 const API_BASE = "http://127.0.0.1:8000";
 
-export async function classifyIncident(description, category, latitude, longitude, imageBase64 = null) {
+export async function classifyIncident(description, category, latitude, longitude, imageBase64 = null, originalTranscript = null, originalLanguage = null, inputMethod = "manual") {
     const token = localStorage.getItem('up_token') || null;
     const res = await fetch(`${API_BASE}/classify`, {
         method: "POST",
@@ -11,7 +11,10 @@ export async function classifyIncident(description, category, latitude, longitud
             latitude,
             longitude,
             image: imageBase64 || null,
-            token   // citizen token so backend can link email for alerts
+            token,   // citizen token so backend can link email for alerts
+            original_transcript: originalTranscript || null,
+            original_language: originalLanguage || null,
+            input_method: inputMethod || "manual"
         })
     });
 
