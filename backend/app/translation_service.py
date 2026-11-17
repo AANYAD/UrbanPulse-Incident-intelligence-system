@@ -239,7 +239,7 @@ class IndicTranslationService:
                     use_cache=False,
                     min_length=0,
                     max_length=256,
-                    num_beams=4,
+                    num_beams=8,
                     num_return_sequences=1
                 )
 
