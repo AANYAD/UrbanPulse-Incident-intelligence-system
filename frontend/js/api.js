@@ -1,27 +1,42 @@
 const API_BASE = "http://127.0.0.1:8000";
 
 export async function translateText(text, sourceLang = "hi-IN") {
-    const res = await fetch(`${API_BASE}/api/translate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            text,
-            source_lang: sourceLang
-        })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        controller.abort();
+    }, 30000);
 
-    if (!res.ok) {
-        let errorDetail = `Translation failed with status ${res.status}`;
-        try {
-            const err = await res.json();
-            if (err && err.detail) {
-                errorDetail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
-            }
-        } catch (_) {}
-        throw new Error(errorDetail);
+    try {
+        const res = await fetch(`${API_BASE}/api/translate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                text,
+                source_lang: sourceLang
+            }),
+            signal: controller.signal
+        });
+
+        if (!res.ok) {
+            let errorDetail = `Translation failed with status ${res.status}`;
+            try {
+                const err = await res.json();
+                if (err && err.detail) {
+                    errorDetail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+                }
+            } catch (_) {}
+            throw new Error(errorDetail);
+        }
+
+        return await res.json();
+    } catch (err) {
+        if (err.name === "AbortError" || controller.signal.aborted) {
+            throw new Error("Translation request timed out after 30 seconds. Please retry.");
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
     }
-
-    return await res.json();
 }
 
 export async function classifyIncident(description, category, latitude, longitude, imageBase64 = null, originalTranscript = null, originalLanguage = null, inputMethod = "manual") {
