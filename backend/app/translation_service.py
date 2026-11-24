@@ -11,7 +11,7 @@ import time
 import ctypes
 import logging
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -187,6 +187,58 @@ class IndicTranslationService:
                 self._is_loaded = False
                 raise RuntimeError(f"Translation engine initialization failed: {str(e)}")
 
+    def _run_inference_batch(self, texts: List[str], flores_src: str) -> List[str]:
+        """
+        Executes model inference on a list of texts within the active inference lock.
+        Maintains strict 1:1 mapping for IndicProcessor placeholder entity maps.
+        """
+        preprocessed_batch = self.processor.preprocess_batch(
+            texts,
+            src_lang=flores_src,
+            tgt_lang=TARGET_LANG
+        )
+
+        inputs = self.tokenizer(
+            preprocessed_batch,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt"
+        ).to(self.device)
+
+        with torch.no_grad():
+            generated_tokens = self.model.generate(
+                **inputs,
+                use_cache=False,
+                min_length=0,
+                max_length=96,
+                num_beams=8,
+                num_return_sequences=1
+            )
+
+        decoded_outputs = self.tokenizer.batch_decode(
+            generated_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        )
+
+        final_translations = self.processor.postprocess_batch(
+            decoded_outputs,
+            lang=TARGET_LANG
+        )
+
+        def _fix_potholes(m: re.Match) -> str:
+            w = m.group(0)
+            if w.isupper():
+                return "POTHOLES"
+            elif w[0].isupper():
+                return "Potholes"
+            return "potholes"
+
+        return [
+            re.sub(r"\bpoths\b", _fix_potholes, t.strip(), flags=re.IGNORECASE)
+            for t in final_translations
+        ]
+
     def translate(self, text: str, source_lang: str) -> Dict[str, Any]:
         """
         Translates text from the supported source language to English.
@@ -230,58 +282,51 @@ class IndicTranslationService:
         try:
             self._ensure_loaded()
 
-            # Preprocess using IndicProcessor
-            preprocessed_batch = self.processor.preprocess_batch(
-                [cleaned_text],
-                src_lang=flores_src,
-                tgt_lang=TARGET_LANG
-            )
+            # 1) Generate the full-sentence translation as the default
+            full_translations = self._run_inference_batch([cleaned_text], flores_src)
+            result_text = full_translations[0].strip()
 
-            # Tokenize
-            inputs = self.tokenizer(
-                preprocessed_batch,
-                truncation=True,
-                padding="longest",
-                return_tensors="pt"
-            ).to(self.device)
+            # 2) Conservative fallback for Hindi compound sentences joined by 'और'
+            if flores_src == "hin_Deva" and " और " in cleaned_text:
+                try:
+                    parts = re.split(r"\s+और\s+", cleaned_text, maxsplit=1)
+                    if len(parts) == 2:
+                        c1, c2 = parts[0].strip(), parts[1].strip()
+                        # Ensure both clauses are non-empty and have lexical substance
+                        if len(c1.split()) >= 2 and len(c2.split()) >= 2:
+                            clause_translations = self._run_inference_batch([c1, c2], flores_src)
+                            t1 = clause_translations[0].strip()
+                            t2 = clause_translations[1].strip()
 
-            # Generate
-            with torch.no_grad():
-                generated_tokens = self.model.generate(
-                    **inputs,
-                    use_cache=False,
-                    min_length=0,
-                    max_length=96,
-                    num_beams=8,
-                    num_return_sequences=1
-                )
+                            if t1 and t2:
+                                stop_words = {
+                                    "the", "a", "an", "is", "are", "was", "were", "it", "its", "it's",
+                                    "in", "on", "at", "of", "to", "for", "and", "or", "there", "this",
+                                    "that", "these", "those", "has", "have", "had", "been", "being"
+                                }
+                                t1_words = {w for w in re.findall(r"\b[A-Za-z]{3,}\b", t1.lower()) if w not in stop_words}
+                                t2_words = {w for w in re.findall(r"\b[A-Za-z]{3,}\b", t2.lower()) if w not in stop_words}
 
-            # Decode tokens
-            decoded_outputs = self.tokenizer.batch_decode(
-                generated_tokens,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=True
-            )
+                                full_lower = result_text.lower()
+                                dropped_c1 = bool(t1_words) and not any(w in full_lower for w in t1_words)
+                                dropped_c2 = bool(t2_words) and not any(w in full_lower for w in t2_words)
 
-            # Postprocess back into natural English with entity placeholders restored
-            final_translations = self.processor.postprocess_batch(
-                decoded_outputs,
-                lang=TARGET_LANG
-            )
+                                # Only replace if full-sentence translation dropped a clause
+                                if dropped_c1 or dropped_c2:
+                                    t1_clean = t1.rstrip(". ,;!")
+                                    t2_clean = re.sub(r"^[Aa]nd\s+", "", t2.strip())
+
+                                    if t1_clean and t2_clean:
+                                        first_char = t2_clean[0].lower() if not t2_clean.startswith("I ") else t2_clean[0]
+                                        t2_formatted = first_char + t2_clean[1:]
+                                        combined = f"{t1_clean} and {t2_formatted}"
+                                        if not combined.endswith((".", "!", "?")):
+                                            combined += "."
+                                        result_text = combined
+                except Exception as fb_err:
+                    logger.warning(f"Hindi clause fallback translation encountered an error, preserving default: {fb_err}")
 
             duration_ms = round((time.time() - start_time) * 1000, 2)
-            result_text = final_translations[0].strip()
-
-            # Postprocessing: Correct model subword generation artifact "poths" -> "potholes"
-            def _fix_potholes(m: re.Match) -> str:
-                w = m.group(0)
-                if w.isupper():
-                    return "POTHOLES"
-                elif w[0].isupper():
-                    return "Potholes"
-                return "potholes"
-
-            result_text = re.sub(r"\bpoths\b", _fix_potholes, result_text, flags=re.IGNORECASE)
 
             return {
                 "original_text": cleaned_text,
