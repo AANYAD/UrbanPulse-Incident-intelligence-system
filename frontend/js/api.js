@@ -1,5 +1,29 @@
 const API_BASE = "http://127.0.0.1:8000";
 
+export async function translateText(text, sourceLang = "hi-IN") {
+    const res = await fetch(`${API_BASE}/api/translate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            text,
+            source_lang: sourceLang
+        })
+    });
+
+    if (!res.ok) {
+        let errorDetail = `Translation failed with status ${res.status}`;
+        try {
+            const err = await res.json();
+            if (err && err.detail) {
+                errorDetail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+            }
+        } catch (_) {}
+        throw new Error(errorDetail);
+    }
+
+    return await res.json();
+}
+
 export async function classifyIncident(description, category, latitude, longitude, imageBase64 = null, originalTranscript = null, originalLanguage = null, inputMethod = "manual") {
     const token = localStorage.getItem('up_token') || null;
     const res = await fetch(`${API_BASE}/classify`, {

@@ -634,13 +634,27 @@
                             Review or edit the captured Hindi transcript below if needed.
                         </p>
                         <textarea class="brutal-input" id="hindiTranscript" rows="2" placeholder="बोलकर दर्ज किया गया हिंदी विवरण..." style="resize:vertical; background:#0e1410; border-color:#204a32; color:#d4f5e2;"></textarea>
+
+                        <div style="display:flex; gap:0.6rem; align-items:center; margin-top:0.6rem; flex-wrap:wrap;">
+                            <button type="button" id="translateHindiBtn" onclick="triggerHindiTranslation()" style="background:#1b2e22; border:1px solid #2e6646; color:#00ff9d; font-family:var(--font-mono); font-size:0.72rem; padding:0.45rem 0.8rem; border-radius:2px; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px;">
+                                <span id="translateBtnIcon">🌐</span>
+                                <span id="translateBtnText">TRANSLATE TO ENGLISH</span>
+                            </button>
+                            <span id="translationSpinner" class="mono" style="display:none; font-size:0.68rem; color:#00ff9d;">TRANSLATING (IndicTrans2)...</span>
+                        </div>
+
+                        <div id="translationStatus" class="mono" style="display:none; font-size:0.68rem; margin-top:0.5rem; line-height:1.4;"></div>
+
                         <div class="mono" style="font-size:0.65rem; color:#ffb84d; margin-top:0.5rem; line-height:1.4;">
-                            ⚠️ <b>Action Required:</b> Please provide or confirm the <b>English Complaint Description</b> below for accurate AI severity assessment and department routing.
+                            ⚠️ <b>Action Required:</b> Please review or edit the translated <b>English Complaint Description</b> below for accurate AI severity assessment and department routing.
                         </div>
                     </div>
 
                     <div class="input-group">
-                        <label id="descLabel">Description <span id="descSubText" class="mono" style="font-size:0.7rem; color:#777; font-weight:normal;">(English)</span></label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem;">
+                            <label id="descLabel" style="margin-bottom:0;">Description <span id="descSubText" class="mono" style="font-size:0.7rem; color:#777; font-weight:normal;">(English)</span></label>
+                            <span id="descTranslationBadge" class="mono" style="display:none; font-size:0.65rem; color:#00ff9d; background:#0c2818; padding:2px 6px; border-radius:2px; border:1px solid #1f3d2b;">AI TRANSLATED — PLEASE REVIEW</span>
+                        </div>
                         <textarea class="brutal-input" id="desc" rows="2" placeholder="Brief details in English..." style="resize: vertical;"></textarea>
                     </div>
 
@@ -667,6 +681,12 @@
         window.getApiBase = function() {
             if (window.location.port === '8000') return '';
             return 'http://127.0.0.1:8000';
+        };
+
+        window.triggerHindiTranslation = function() {
+            if (typeof window.translateHindiToEnglish === 'function') {
+                window.translateHindiToEnglish();
+            }
         };
 
         // MODAL
