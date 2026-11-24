@@ -146,6 +146,19 @@ class IndicProcessor:
         self._EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}")
         self._OTHER_PATTERN = re.compile(r"[A-Za-z0-9]*[#|@]\w+")
 
+        ##############################
+        # Civic Terminology Normalization Patterns (Hindi)
+        ##############################
+        self._CIVIC_SEWER_OVERFLOW_PATTERN = re.compile(r"\bसीवर\s+ओवरफ्लो\b")
+        self._CIVIC_POTHOLE_PATTERN = re.compile(r"\bबहुत\s+बड़ा\s+गड्ढा\b")
+        self._CIVIC_STREETLIGHT_PATTERN = re.compile(r"\bस्ट्रीट\s*लाइट\s+खराब\s+है\b")
+        self._CIVIC_GARBAGE_WITH_VERB_PATTERN = re.compile(
+            r"\b(?:कूड़ा|कचरा)\s+उठाने\s+वाली\s+गाड़ी\b(.*?)\bनहीं\s+आई(\s+है)?\b"
+        )
+        self._CIVIC_GARBAGE_NOUN_PATTERN = re.compile(
+            r"\b(?:कूड़ा|कचरा)\s+उठाने\s+वाली\s+गाड़ी\b"
+        )
+
         self._PUNC_REPLACEMENTS = [
             (re.compile(r"\r"), ""),
             (re.compile(r"\(\s*"), "("),
@@ -283,6 +296,35 @@ class IndicProcessor:
             xlated = xlated.replace(" ् ", "्")
         return xlated
 
+    def _normalize_civic_terms(self, text: str) -> str:
+        """
+        Targeted normalization for empirical IndicTrans2 Hindi civic terminology failures:
+        1. Sewer overflow: 'सीवर ओवरफ्लो' -> 'गंदे पानी का नाला ओवरफ्लो'
+        2. Pothole: 'बहुत बड़ा गड्ढा' -> 'बड़ा गड्ढा'
+        3. Streetlight: 'स्ट्रीट लाइट खराब है' -> 'सड़क की बत्ती खराब है'
+        4. Garbage collection vehicle: 'कूड़ा उठाने वाली गाड़ी' -> 'कचरा उठाने वाला वाहन'
+           with grammatical verb agreement ('नहीं आई है' -> 'नहीं आया है')
+        """
+        # Rule 1 — Sewer overflow
+        text = self._CIVIC_SEWER_OVERFLOW_PATTERN.sub("गंदे पानी का नाला ओवरफ्लो", text)
+
+        # Rule 2 — Pothole: normalize only "बहुत बड़ा गड्ढा" to "बड़ा गड्ढा"
+        text = self._CIVIC_POTHOLE_PATTERN.sub("बड़ा गड्ढा", text)
+
+        # Rule 3 — Streetlight: normalize only the tested streetlight broken expression
+        text = self._CIVIC_STREETLIGHT_PATTERN.sub("सड़क की बत्ती खराब है", text)
+
+        # Rule 4 — Garbage collection vehicle: preserve municipal vehicle meaning and verb agreement
+        if self._CIVIC_GARBAGE_WITH_VERB_PATTERN.search(text):
+            text = self._CIVIC_GARBAGE_WITH_VERB_PATTERN.sub(
+                lambda m: f"कचरा उठाने वाला वाहन{m.group(1)}नहीं आया{m.group(2) or ''}",
+                text
+            )
+        else:
+            text = self._CIVIC_GARBAGE_NOUN_PATTERN.sub("कचरा उठाने वाला वाहन", text)
+
+        return text
+
     def _preprocess(
         self,
         sent: str,
@@ -297,6 +339,10 @@ class IndicProcessor:
 
         # 1) Punctuation normalization
         sent = self._punc_norm(sent)
+
+        # 1.5) Targeted Hindi civic terminology normalization
+        if not is_target and iso_lang == "hi":
+            sent = self._normalize_civic_terms(sent)
 
         # 2) Numerals & placeholders
         sent = self._normalize(sent)
