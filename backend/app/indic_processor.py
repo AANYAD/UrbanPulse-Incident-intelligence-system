@@ -149,7 +149,7 @@ class IndicProcessor:
         ##############################
         # Civic Terminology Normalization Patterns (Hindi)
         ##############################
-        self._CIVIC_SEWER_OVERFLOW_PATTERN = re.compile(r"\bसीवर\s+ओवरफ्लो\b")
+        self._CIVIC_SEWER_OVERFLOW_PATTERN = re.compile(r"\b(?:सीवर|सीवेज)\s+ओवरफ्लो\b")
         self._CIVIC_POTHOLE_PATTERN = re.compile(r"\bबहुत\s+बड़ा\s+गड्ढा\b")
         self._CIVIC_STREETLIGHT_PATTERN = re.compile(r"\bस्ट्रीट\s*लाइट\s+खराब\s+है\b")
         self._CIVIC_GARBAGE_WITH_VERB_PATTERN = re.compile(
@@ -299,7 +299,7 @@ class IndicProcessor:
     def _normalize_civic_terms(self, text: str) -> str:
         """
         Targeted normalization for empirical IndicTrans2 Hindi civic terminology failures:
-        1. Sewer overflow: 'सीवर ओवरफ्लो' -> 'गंदे पानी का नाला ओवरफ्लो'
+        1. Sewer overflow: 'सीवर/सीवेज ओवरफ्लो' -> 'गंदे पानी का नाला ओवरफ्लो'
         2. Pothole: 'बहुत बड़ा गड्ढा' -> 'बड़ा गड्ढा'
         3. Streetlight: 'स्ट्रीट लाइट खराब है' -> 'सड़क की बत्ती खराब है'
         4. Garbage collection vehicle: 'कूड़ा उठाने वाली गाड़ी' -> 'कचरा उठाने वाला वाहन'
@@ -340,9 +340,12 @@ class IndicProcessor:
         # 1) Punctuation normalization
         sent = self._punc_norm(sent)
 
-        # 1.5) Targeted Hindi civic terminology normalization
+        # 1.5) Targeted Hindi civic terminology normalization & sentence boundary
         if not is_target and iso_lang == "hi":
             sent = self._normalize_civic_terms(sent)
+            sent = sent.strip()
+            if sent and sent[-1] not in "।.?!":
+                sent += " ।"
 
         # 2) Numerals & placeholders
         sent = self._normalize(sent)
