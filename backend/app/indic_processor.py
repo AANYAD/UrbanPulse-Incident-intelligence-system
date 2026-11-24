@@ -158,6 +158,14 @@ class IndicProcessor:
         self._CIVIC_GARBAGE_NOUN_PATTERN = re.compile(
             r"\b(?:कूड़ा|कचरा)\s+उठाने\s+वाली\s+गाड़ी\b"
         )
+        self._CIVIC_GARBAGE_PICKUP_PATTERN = re.compile(
+            r"\bकूड़ा\b(?=\s+(?:तक\s+|भी\s+)?(?:नहीं\s+)?उठाया\s+गया(?:\s+है)?\b)"
+        )
+        self._CIVIC_BROKEN_ROAD_PATTERN = re.compile(r"\bसड़क\s+टूटी\s+हुई\s+है\b")
+        self._CIVIC_DRAIN_JAM_PATTERN = re.compile(r"\bनाली\s+जाम\s+है\b")
+        self._CIVIC_AREA_PHRASE_PATTERN = re.compile(
+            r"\b(?:हमारे\s+इलाके|हमारे\s+क्षेत्र|इस\s+इलाके)\s+में\b"
+        )
 
         self._PUNC_REPLACEMENTS = [
             (re.compile(r"\r"), ""),
@@ -322,6 +330,19 @@ class IndicProcessor:
             )
         else:
             text = self._CIVIC_GARBAGE_NOUN_PATTERN.sub("कचरा उठाने वाला वाहन", text)
+
+        # Rule 5 — Garbage pickup: normalize "कूड़ा" to "कचरा" only in expressions with उठाया गया है / नहीं उठाया गया है
+        text = self._CIVIC_GARBAGE_PICKUP_PATTERN.sub("कचरा", text)
+
+        # Rule 6 — Broken road: normalize "सड़क टूटी हुई है" to "सड़क टूट गई है"
+        text = self._CIVIC_BROKEN_ROAD_PATTERN.sub("सड़क टूट गई है", text)
+
+        # Rule 7 — Clogged drain: normalize "नाली जाम है"
+        if self._CIVIC_DRAIN_JAM_PATTERN.search(text):
+            if self._CIVIC_AREA_PHRASE_PATTERN.search(text):
+                text = self._CIVIC_DRAIN_JAM_PATTERN.sub("नाली बंद है", text)
+            else:
+                text = self._CIVIC_DRAIN_JAM_PATTERN.sub("नाली जाम हो गई है", text)
 
         return text
 

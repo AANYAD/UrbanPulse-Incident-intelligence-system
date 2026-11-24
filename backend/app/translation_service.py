@@ -6,6 +6,7 @@ RAM monitoring, and graceful error handling.
 
 import os
 import sys
+import re
 import time
 import ctypes
 import logging
@@ -136,6 +137,7 @@ class IndicTranslationService:
                     self.tokenizer = AutoTokenizer.from_pretrained(
                         selected_model,
                         trust_remote_code=True,
+                        local_files_only=True,
                         token=hf_token
                     )
                 except Exception as tok_err:
@@ -148,10 +150,15 @@ class IndicTranslationService:
                         selected_model = self.fallback_model_name
                         self.tokenizer = AutoTokenizer.from_pretrained(
                             selected_model,
-                            trust_remote_code=True
+                            trust_remote_code=True,
+                            local_files_only=True
                         )
                     else:
-                        raise tok_err
+                        self.tokenizer = AutoTokenizer.from_pretrained(
+                            selected_model,
+                            trust_remote_code=True,
+                            token=hf_token
+                        )
 
                 logger.info(f"Loading model weights from {selected_model} in float32 on {self.device}...")
                 self.model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -213,8 +220,14 @@ class IndicTranslationService:
 
         start_time = time.time()
 
-        # Ensure single-instance thread-safe execution
-        with self._inference_lock:
+        # Ensure single-instance thread-safe execution with timeout
+        acquired = self._inference_lock.acquire(timeout=INFERENCE_TIMEOUT_SEC)
+        if not acquired:
+            raise TimeoutError(
+                f"Translation engine busy: could not acquire inference lock within {INFERENCE_TIMEOUT_SEC} seconds."
+            )
+
+        try:
             self._ensure_loaded()
 
             # Preprocess using IndicProcessor
@@ -238,7 +251,7 @@ class IndicTranslationService:
                     **inputs,
                     use_cache=False,
                     min_length=0,
-                    max_length=256,
+                    max_length=96,
                     num_beams=8,
                     num_return_sequences=1
                 )
@@ -259,6 +272,17 @@ class IndicTranslationService:
             duration_ms = round((time.time() - start_time) * 1000, 2)
             result_text = final_translations[0].strip()
 
+            # Postprocessing: Correct model subword generation artifact "poths" -> "potholes"
+            def _fix_potholes(m: re.Match) -> str:
+                w = m.group(0)
+                if w.isupper():
+                    return "POTHOLES"
+                elif w[0].isupper():
+                    return "Potholes"
+                return "potholes"
+
+            result_text = re.sub(r"\bpoths\b", _fix_potholes, result_text, flags=re.IGNORECASE)
+
             return {
                 "original_text": cleaned_text,
                 "translated_text": result_text,
@@ -268,3 +292,5 @@ class IndicTranslationService:
                 "duration_ms": duration_ms,
                 "was_translated": True
             }
+        finally:
+            self._inference_lock.release()

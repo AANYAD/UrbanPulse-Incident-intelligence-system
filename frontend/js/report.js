@@ -118,11 +118,15 @@ window.translateHindiToEnglish = async function(customText = null, isAuto = fals
         }
     } finally {
         isTranslating = false;
-        if (translateBtn) {
-            translateBtn.disabled = false;
-            translateBtn.style.opacity = "1";
+        const currentBtn = translateBtn || document.getElementById("translateHindiBtn");
+        if (currentBtn) {
+            currentBtn.disabled = false;
+            currentBtn.style.opacity = "1";
         }
-        if (translationSpinner) translationSpinner.style.display = "none";
+        const currentSpinner = translationSpinner || document.getElementById("translationSpinner");
+        if (currentSpinner) {
+            currentSpinner.style.display = "none";
+        }
     }
 };
 
@@ -180,10 +184,12 @@ window.toggleVoiceInput = function() {
             const transcript = event.results[0][0].transcript.trim();
             if (!transcript) return;
 
-            window.hasUsedVoiceInput = true;
-            window.lastVoiceLanguage = targetLang;
+            const isHindi = targetLang === "hi-IN" || /[\u0900-\u097F]/.test(transcript);
 
-            if (targetLang === "hi-IN") {
+            window.hasUsedVoiceInput = true;
+            window.lastVoiceLanguage = isHindi ? "hi-IN" : targetLang;
+
+            if (isHindi) {
                 const hindiContainer = document.getElementById("hindiTranscriptContainer");
                 const hindiInput = document.getElementById("hindiTranscript");
 
